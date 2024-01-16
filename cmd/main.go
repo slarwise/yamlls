@@ -89,7 +89,6 @@ func main() {
 			fileURIToContents[doc.URI] = doc.Text
 			log.Info("In channel goroutine", "fileURIToContents", fileURIToContents)
 			diagnostics := []messages.Diagnostic{}
-			// diagnostics = append(diagnostics, getKind(doc.Text)...)
 			diagnostics = append(diagnostics, getDocs(doc.Text)...)
 			m.Notify(messages.PublishDiagnosticsMethod, messages.PublishDiagnosticsParams{
 				URI:         doc.URI,
@@ -150,6 +149,10 @@ func main() {
 		if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 			return nil, errors.New("Not found")
 		}
+		// Get the node that the cursor is on
+		// Get the path of that node
+		// Use JSONPath to get the corresponding node in the json schema
+		// Return the description of that node
 		word := getCurrentWord(params.Position, text)
 		properties := decoded["properties"].(map[string]interface{})
 		object, found := properties[word]
