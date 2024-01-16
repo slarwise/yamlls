@@ -26,6 +26,7 @@ type InitializeResult struct {
 type ServerCapabilities struct {
 	TextDocumentSync   TextDocumentSyncKind `json:"textDocumentSync"`
 	CompletionProvider *CompletionOptions   `json:"completionProvider,omitempty"`
+	HoverProvider      bool                 `json:"hoverProvider,omitempty"`
 }
 
 type TextDocumentSyncKind int
@@ -195,3 +196,17 @@ type ShutdownResponse struct {
 	Error int `json:"error"`
 }
 type ExitParams struct{}
+
+type HoverParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type HoverResult struct {
+	Contents MarkupContent `json:"contents"`
+}
+
+type MarkupContent struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+}

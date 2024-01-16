@@ -36,3 +36,22 @@ command = "yamlls"
 This repo is basically copied from
 [a-h/examplelsp](https://github.com/a-h/examplelsp), which is an awesome
 starting point for understanding how to write a language server!
+
+## File detection
+
+- Kubernetes: Everything kubernetes has `kind` and `apiVersion` on the top
+  level. If the user has entered one of them, we can give completions for the
+  other.
+- github actions? Can look at the filepath, if it is under github/workflows then
+  we can be sure.
+- Other stuff? Not sure yet.
+- Should we treat kubernetes and github actions as their own languages? That
+  would simplify the language server, if we have separate ones for each. For
+  example, bash files use the shebang to identify the language, not the file
+  extension.
+
+## Json schemas
+
+- Kubernetes: yannh/kubernetes-json-schema
+- Kubernetes Custom Resource Definitions: datreeio/CRDs-catalog
+- Github and others: json.schemastore.org
