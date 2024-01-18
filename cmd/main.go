@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"path"
 	"regexp"
@@ -99,7 +100,7 @@ func main() {
 			fileURIToContents[doc.URI] = doc.Text
 			logger.Info("In channel goroutine", "fileURIToContents", fileURIToContents)
 			diagnostics := []messages.Diagnostic{}
-			diagnostics = append(diagnostics, getDocs(doc.Text)...) // TODO: Make this a code action
+			diagnostics = append(diagnostics, getDocs(doc.Text)...) // TODO: Make this a codeAction, a documentLink or a showDocument
 			m.Notify(messages.PublishDiagnosticsMethod, messages.PublishDiagnosticsParams{
 				URI:         doc.URI,
 				Version:     &doc.Version,
@@ -278,17 +279,18 @@ func getDocs(text string) []messages.Diagnostic {
 	if !found {
 		return nil
 	}
-	url := getExternalDocumentation(kind.(string), apiVersion.(string))
-	if url == "" {
+	schemaURL := getExternalDocumentation(kind.(string), apiVersion.(string))
+	if schemaURL == "" {
 		return nil
 	}
+	viewerUrl := "https://json-schema.app/view/" + url.PathEscape("#") + "?url=" + url.QueryEscape(schemaURL)
 	d := messages.Diagnostic{
 		Range: messages.Range{
 			Start: messages.NewPosition(0, 0),
 			End:   messages.NewPosition(1, 0),
 		},
 		Severity: ptr(messages.DiagnosticSeverityHint),
-		Message:  fmt.Sprintf("Docs: %s", url),
+		Message:  fmt.Sprintf("Docs: %s", viewerUrl),
 	}
 	return []messages.Diagnostic{d}
 }
