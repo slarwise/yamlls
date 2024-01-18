@@ -14,6 +14,8 @@
   read though
 - Would be cool with a code action that fills all fields, or all required
   fields. Similar to fill struct with gopls
+- Completion: complete apiVersion would be useful, especially for CRDs. Probably
+  need to find these from the file names in the different kubernetes repos.
 
 ## Helix configuration
 
