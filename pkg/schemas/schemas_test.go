@@ -6,10 +6,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path"
+	"slices"
 	"testing"
 )
 
 const cacheDir = "./test-data/schemas"
+
+var logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 func TestReadCache(t *testing.T) {
 	store, err := NewSchemaStore(slog.Default(), cacheDir, "http://localhost:8080")
@@ -122,7 +125,7 @@ func TestSchemaFromKindApiVersion(t *testing.T) {
 				w.Write([]byte("{}"))
 			}))
 			defer server.Close()
-			store, _ := NewSchemaStore(slog.Default(), cacheDir, server.URL)
+			store, _ := NewSchemaStore(logger, cacheDir, server.URL)
 			_, found := store.SchemaFromKindApiVersion(test.kind, test.apiVersion)
 			if found != test.found {
 				t.Fatalf("Expected to find schema for kind `%s` and apiVersion `%s`", test.kind, test.apiVersion)
@@ -131,9 +134,9 @@ func TestSchemaFromKindApiVersion(t *testing.T) {
 	}
 }
 
-func TestGetDescription(t *testing.T) {
+func TestGetDescriptionFromKindApiVersion(t *testing.T) {
 	yamlPath := "$.spec.ports"
-	store, err := NewSchemaStore(slog.Default(), cacheDir, "")
+	store, err := NewSchemaStore(logger, cacheDir, "")
 	if err != nil {
 		t.Fatalf("Could not create schema store: %s", err)
 	}
@@ -153,5 +156,40 @@ func TestToSchemaPath(t *testing.T) {
 	expected := "properties.spec.properties.ports"
 	if schemaPath != expected {
 		t.Fatalf("Expected %s, got %s", expected, schemaPath)
+	}
+}
+
+func TestGetPropertiesFromKindApiVersion(t *testing.T) {
+	tests := map[string]struct {
+		yamlPath string
+		expected []string
+	}{
+		"root": {
+			yamlPath: "$.",
+			expected: []string{"apiVersion", "kind", "metadata", "spec", "status"},
+		},
+		"metadata": {
+			yamlPath: "$.metadata",
+			expected: []string{"namespace", "selfLink", "finalizers", "name", "generation", "resourceVersion", "annotations", "generateName", "labels", "uid", "creationTimestamp", "deletionTimestamp", "ownerReferences", "deletionGracePeriodSeconds", "managedFields"},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			kind := "Service"
+			apiVersion := "v1"
+			store, err := NewSchemaStore(logger, cacheDir, "")
+			if err != nil {
+				t.Fatalf("Could not create schema store: %s", err)
+			}
+			properties, found := store.GetPropertiesFromKindApiVersion(kind, apiVersion, test.yamlPath)
+			if !found {
+				t.Fatal("Expected to find properties")
+			}
+			slices.Sort(properties)
+			slices.Sort(test.expected)
+			if !slices.Equal(properties, test.expected) {
+				t.Fatalf("Expected %v, got %v", test.expected, properties)
+			}
+		})
 	}
 }

@@ -210,3 +210,14 @@ type MarkupContent struct {
 	Kind  string `json:"kind"`
 	Value string `json:"value"`
 }
+
+type CompletionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type CompletionResult []CompletionItem
+type CompletionItem struct {
+	Label         string        `json:"label"`
+	Documentation MarkupContent `json:"documentation"`
+}

@@ -65,8 +65,9 @@ func main() {
 
 		result := messages.InitializeResult{
 			Capabilities: messages.ServerCapabilities{
-				TextDocumentSync: messages.TextDocumentSyncKindFull,
-				HoverProvider:    true,
+				TextDocumentSync:   messages.TextDocumentSyncKindFull,
+				CompletionProvider: &messages.CompletionOptions{TriggerCharacters: []string{":"}},
+				HoverProvider:      true,
 			},
 			ServerInfo: &messages.ServerInfo{
 				Name: "yamlls",
@@ -142,6 +143,7 @@ func main() {
 		text := fileURIToContents[params.TextDocument.URI]
 		kind, apiVersion, found := schemas.GetKindApiVersion([]byte(text))
 		if !found {
+			logger.Error("Failed to get kind and apiVersion", "text", string(text))
 			return nil, errors.New("Not found")
 		}
 		yamlPath, err := ast.GetPathAtPosition(params.Position.Line+1, params.Position.Character+1, text)
@@ -160,6 +162,48 @@ func main() {
 				Value: description,
 			},
 		}, nil
+	})
+
+	m.HandleMethod("textDocument/completion", func(rawParams json.RawMessage) (any, error) {
+		logger.Info("Received textDocument/completion request")
+		var params messages.CompletionParams
+		if err := json.Unmarshal(rawParams, &params); err != nil {
+			return nil, err
+		}
+		text := fileURIToContents[params.TextDocument.URI]
+		textBeforeCursor := strings.Split(text, "\n")
+		textBeforeCursor = textBeforeCursor[:params.Position.Line]
+		kind, apiVersion, found := schemas.GetKindApiVersion([]byte(strings.Join(textBeforeCursor, "\n")))
+		if !found {
+			logger.Error("Failed to get kind and apiVersion")
+			return nil, errors.New("Not found")
+		}
+		// TODO: This fails when there is a syntax error, which it will be
+		// when you haven't finished writing the field name. Perhaps get the
+		// node with one less indent?
+		yamlPath, err := ast.GetPathAtPosition(params.Position.Line+1, params.Position.Character+1, text)
+		if err != nil {
+			logger.Error("Failed to get path at position", "line", params.Position.Line, "column", params.Position.Character)
+			return nil, errors.New("Not found")
+		}
+		parentPath := schemas.GetPathToParent(yamlPath)
+		logger.Info("Computed parent path", "parent_path", parentPath)
+		properties, found := schemaStore.GetPropertiesFromKindApiVersion(kind, apiVersion, parentPath)
+		if !found {
+			logger.Error("Failed to get properties", "yaml_path", yamlPath)
+			return nil, errors.New("Not found")
+		}
+		result := messages.CompletionResult{}
+		for _, p := range properties {
+			result = append(result, messages.CompletionItem{
+				Label: p,
+				Documentation: messages.MarkupContent{
+					Kind:  "markdown",
+					Value: "TODO: Description",
+				},
+			})
+		}
+		return result, nil
 	})
 
 	logger.Info("Handler set up", "log_path", logpath)
