@@ -17,6 +17,36 @@
 - Completion: complete apiVersion would be useful, especially for CRDs. Probably
   need to find these from the file names in the different kubernetes repos.
 
+## TODO
+
+- [ ] JSON schemas:
+  - [x] [Kubernetes](github.com/yannh/kubernetes-json-schema). Detect from
+        `kind` and `apiVersion`.
+  - [ ] [Custom Resource Definitions](github.com/datreeio/CRDs-catalog). Detect
+        from `kind` and `apiVersion`.
+  - [ ] [Others](json.schemastore.org). Detect from filename.
+- [x] Hover
+  - [x] Show description of the current key
+- [ ] Completion
+  - [ ] If `kind` or `apiVersion` is given, give completion suggestions for the
+        other
+  - [ ] Suggest `enum`s from the schema
+- [ ] Code actions
+  - [ ] Give link to external documentation
+  - [ ] Fill all required fields. Use placeholders that fit the type, or the
+        first `enum`.
+  - [ ] Add all files in the current directory to .resources in a Kustomization
+        file
+- [ ] Background http server
+  - [ ] Show external documentation in a nice way for the currently open file.
+        Can do this since we get notifications when the user changes file.
+- [ ] Diagnostics
+  - [ ] Validate against the schema
+  - [ ] Info diagnostic for Kustomization files when not all files in the
+        current dir are included
+- [ ] Notifications
+  - [ ] Notify when a schema is detected/changed for the current file
+
 ## Helix configuration
 
 Create a new language `slarwise` with extension `.slar` to test with.
@@ -38,22 +68,3 @@ command = "yamlls"
 This repo is basically copied from
 [a-h/examplelsp](https://github.com/a-h/examplelsp), which is an awesome
 starting point for understanding how to write a language server!
-
-## File detection
-
-- Kubernetes: Everything kubernetes has `kind` and `apiVersion` on the top
-  level. If the user has entered one of them, we can give completions for the
-  other.
-- github actions? Can look at the filepath, if it is under github/workflows then
-  we can be sure.
-- Other stuff? Not sure yet.
-- Should we treat kubernetes and github actions as their own languages? That
-  would simplify the language server, if we have separate ones for each. For
-  example, bash files use the shebang to identify the language, not the file
-  extension.
-
-## Json schemas
-
-- Kubernetes: yannh/kubernetes-json-schema
-- Kubernetes Custom Resource Definitions: datreeio/CRDs-catalog
-- Github and others: json.schemastore.org
