@@ -33,9 +33,9 @@ type pathCapturer struct {
 }
 
 func (c *pathCapturer) Visit(node ast.Node) ast.Visitor {
-	if node.Type() != ast.StringType {
-		return c
-	}
+	// if node.Type() != ast.StringType {
+	// return c
+	// }
 	c.Paths = append(c.Paths, node.GetPath())
 	token := node.GetToken()
 	c.Lines = append(c.Lines, token.Position.Line)

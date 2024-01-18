@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -20,7 +22,7 @@ const (
 	CRDSchemaStoreURL        = "https://github.com/datreeio/CRDs-catalog"
 )
 
-func NewSchemaStore(cacheDir string, addr string) (SchemaStore, error) {
+func NewSchemaStore(logger *slog.Logger, cacheDir string, addr string) (SchemaStore, error) {
 	dirEntries, err := os.ReadDir(cacheDir)
 	if err != nil {
 		return SchemaStore{}, fmt.Errorf("Failed to read cache dir for schemas: %s", err)
@@ -44,6 +46,7 @@ func NewSchemaStore(cacheDir string, addr string) (SchemaStore, error) {
 		CacheDir: cacheDir,
 		Cache:    cache,
 		URL:      addr,
+		Logger:   logger,
 	}, nil
 }
 
@@ -51,6 +54,7 @@ type SchemaStore struct {
 	CacheDir string
 	Cache    map[string][]byte
 	URL      string
+	Logger   *slog.Logger
 }
 
 func GetKindApiVersion(data []byte) (string, string, bool) {
@@ -84,21 +88,27 @@ func (s *SchemaStore) SchemaFromKindApiVersion(kind string, apiVersion string) (
 		return schema, true
 	}
 	yannhKey := strings.ToLower(fmt.Sprintf("%s-%s", kind, strings.ReplaceAll(apiVersion, "/", "-")))
-	URL, err := url.JoinPath(s.URL, "yannh/kubernetes-json-schema/blob/master/master-standalone-strict", yannhKey+".json")
+	URL, err := url.JoinPath(s.URL, "yannh/kubernetes-json-schema/master/master-standalone-strict", yannhKey+".json")
 	if err != nil {
-		panic(fmt.Sprintf("Could not build URL from key %s", key))
+		s.Logger.Info("Could not build URL", "key", key)
+		return []byte{}, false
 	}
 	resp, err := http.Get(URL)
 	if err != nil {
-		panic(fmt.Errorf("Could not call the internet: %s", err))
+		s.Logger.Info("Could call the internet", "error", err)
+		return []byte{}, false
+	}
+	if resp.StatusCode != 200 {
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		panic("Could not read body")
+		s.Logger.Info("Could not read body", "error", err)
+		return []byte{}, false
 	}
 	if err = os.WriteFile(path.Join(s.CacheDir, key+".json"), body, 0644); err != nil {
-		panic(fmt.Errorf("Could not write schema file: %s", err))
+		s.Logger.Info("Could not write schema file", "error", err)
+		return []byte{}, false
 	}
 	s.Cache[key] = body
 	return body, true
@@ -108,24 +118,29 @@ func schemaKeyFromKindApiVersion(kind string, apiVersion string) string {
 	return strings.ToLower(fmt.Sprintf("%s-%s", kind, strings.ReplaceAll(apiVersion, "/", "-")))
 }
 
-func (s *SchemaStore) GetDescriptionFromKindApiVersion(kind string, apiVersion string, yamlPath *yaml.Path) (string, bool) {
+func (s *SchemaStore) GetDescriptionFromKindApiVersion(kind string, apiVersion string, yamlPath string) (string, bool) {
 	schema, found := s.SchemaFromKindApiVersion(kind, apiVersion)
 	if !found {
+		s.Logger.Info("Could not find schema", "kind", kind, "apiVersion", apiVersion)
 		return "", false
 	}
-	path := toSchemaPath(*yamlPath)
+	path := toSchemaPath(yamlPath)
 	path = path + ".description"
-	result := gjson.Get(string(schema), path)
+	s.Logger.Info("Description", "yaml_path", yamlPath, "description_path", path)
+	result := gjson.GetBytes(schema, path)
 	if !result.Exists() {
+		s.Logger.Error("Failed to get description", "yaml_path", yamlPath, "description_path", path)
 		return "", false
 	}
 	return result.String(), true
 }
 
-func toSchemaPath(yamlPath yaml.Path) string {
-	path := yamlPath.String()
+func toSchemaPath(path string) string {
 	path = strings.TrimPrefix(path, "$.")
 	path = strings.ReplaceAll(path, ".", ".properties.")
+	// Replace [\d+] with .items.
+	regex := regexp.MustCompile(`\[\d\]\.`)
+	path = regex.ReplaceAllString(path, ".items.")
 	path = "properties." + path
 	return path
 }

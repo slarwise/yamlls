@@ -1,19 +1,18 @@
 package schemas
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path"
 	"testing"
-
-	"github.com/goccy/go-yaml"
 )
 
 const cacheDir = "./test-data/schemas"
 
 func TestReadCache(t *testing.T) {
-	store, err := NewSchemaStore(cacheDir, "http://localhost:8080")
+	store, err := NewSchemaStore(slog.Default(), cacheDir, "http://localhost:8080")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +106,7 @@ func TestSchemaFromKindApiVersion(t *testing.T) {
 			kind:       "Deployment",
 			apiVersion: "apps/v1",
 			found:      true,
-			URLPath:    "/yannh/kubernetes-json-schema/blob/master/master-standalone-strict/deployment-apps-v1.json"},
+			URLPath:    "/yannh/kubernetes-json-schema/master/master-standalone-strict/deployment-apps-v1.json"},
 	}
 	defer func() {
 		os.Remove(path.Join(cacheDir, "deployment-apps-v1.json"))
@@ -123,7 +122,7 @@ func TestSchemaFromKindApiVersion(t *testing.T) {
 				w.Write([]byte("{}"))
 			}))
 			defer server.Close()
-			store, _ := NewSchemaStore(cacheDir, server.URL)
+			store, _ := NewSchemaStore(slog.Default(), cacheDir, server.URL)
 			_, found := store.SchemaFromKindApiVersion(test.kind, test.apiVersion)
 			if found != test.found {
 				t.Fatalf("Expected to find schema for kind `%s` and apiVersion `%s`", test.kind, test.apiVersion)
@@ -133,11 +132,8 @@ func TestSchemaFromKindApiVersion(t *testing.T) {
 }
 
 func TestGetDescription(t *testing.T) {
-	yamlPath, err := yaml.PathString("$.spec.ports")
-	if err != nil {
-		t.Fatalf("Could not create yaml path: %s", err)
-	}
-	store, err := NewSchemaStore(cacheDir, "")
+	yamlPath := "$.spec.ports"
+	store, err := NewSchemaStore(slog.Default(), cacheDir, "")
 	if err != nil {
 		t.Fatalf("Could not create schema store: %s", err)
 	}
@@ -152,11 +148,8 @@ func TestGetDescription(t *testing.T) {
 }
 
 func TestToSchemaPath(t *testing.T) {
-	yamlPath, err := yaml.PathString("$.spec.ports")
-	if err != nil {
-		t.Fatalf("Could not create yaml path: %s", err)
-	}
-	schemaPath := toSchemaPath(*yamlPath)
+	yamlPath := "$.spec.ports"
+	schemaPath := toSchemaPath(yamlPath)
 	expected := "properties.spec.properties.ports"
 	if schemaPath != expected {
 		t.Fatalf("Expected %s, got %s", expected, schemaPath)

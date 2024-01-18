@@ -5,14 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"path"
 	"regexp"
 	"strings"
 
+	"github.com/slarwise/yamlls/pkg/ast"
 	"github.com/slarwise/yamlls/pkg/lsp"
 	"github.com/slarwise/yamlls/pkg/messages"
+	"github.com/slarwise/yamlls/pkg/schemas"
 	"gopkg.in/yaml.v3"
 )
 
@@ -30,20 +31,28 @@ func main() {
 	logfile, err := os.Create(logpath)
 	if err != nil {
 		slog.Error("Failed to create log output file", "error", err)
+		os.Exit(1)
 	}
 	defer logfile.Close()
-	log := slog.New(slog.NewJSONHandler(logfile, nil))
+	logger := slog.New(slog.NewJSONHandler(logfile, nil))
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error("panic", "recovered", r)
+			logger.Error("panic", "recovered", r)
 		}
 	}()
 
-	if err := os.MkdirAll(path.Join(cacheDir, "yamlls", "schemas"), 0755); err != nil {
-		slog.Error("Failed to create `yamlls/schemas` dir in cache directory", "cache_dir", cacheDir, "error", err)
+	schemasDir := path.Join(cacheDir, "yamlls", "schemas")
+	if err := os.MkdirAll(schemasDir, 0755); err != nil {
+		logger.Error("Failed to create `yamlls/schemas` dir in cache directory", "cache_dir", cacheDir, "error", err)
+		os.Exit(1)
+	}
+	schemaStore, err := schemas.NewSchemaStore(logger, schemasDir, "https://raw.githubusercontent.com")
+	if err != nil {
+		logger.Error("Failed to create schema store", "error", err)
+		os.Exit(1)
 	}
 
-	m := lsp.NewMux(log, os.Stdin, os.Stdout)
+	m := lsp.NewMux(logger, os.Stdin, os.Stdout)
 
 	fileURIToContents := map[string]string{}
 
@@ -52,7 +61,7 @@ func main() {
 		if err = json.Unmarshal(params, &initializeParams); err != nil {
 			return nil, err
 		}
-		log.Info("Received initialize request", "params", initializeParams)
+		logger.Info("Received initialize request", "params", initializeParams)
 
 		result := messages.InitializeResult{
 			Capabilities: messages.ServerCapabilities{
@@ -67,18 +76,18 @@ func main() {
 	})
 
 	m.HandleNotification("initialized", func(params json.RawMessage) error {
-		log.Info("Receivied initialized notification", "params", params)
+		logger.Info("Receivied initialized notification", "params", params)
 		return nil
 	})
 
 	m.HandleMethod("shutdown", func(params json.RawMessage) (any, error) {
-		log.Info("Received shutdown request")
+		logger.Info("Received shutdown request")
 		return nil, nil
 	})
 
 	exitChannel := make(chan int, 1)
 	m.HandleNotification("exit", func(params json.RawMessage) error {
-		log.Info("Received exit notification")
+		logger.Info("Received exit notification")
 		exitChannel <- 1
 		return nil
 	})
@@ -87,9 +96,9 @@ func main() {
 	go func() {
 		for doc := range documentUpdates {
 			fileURIToContents[doc.URI] = doc.Text
-			log.Info("In channel goroutine", "fileURIToContents", fileURIToContents)
+			logger.Info("In channel goroutine", "fileURIToContents", fileURIToContents)
 			diagnostics := []messages.Diagnostic{}
-			diagnostics = append(diagnostics, getDocs(doc.Text)...)
+			diagnostics = append(diagnostics, getDocs(doc.Text)...) // TODO: Make this a code action
 			m.Notify(messages.PublishDiagnosticsMethod, messages.PublishDiagnosticsParams{
 				URI:         doc.URI,
 				Version:     &doc.Version,
@@ -99,7 +108,7 @@ func main() {
 	}()
 
 	m.HandleNotification(messages.DidOpenTextDocumentNotification, func(rawParams json.RawMessage) error {
-		log.Info("Received didOpenTextDocument notification")
+		logger.Info("Received didOpenTextDocument notification")
 		var params messages.DidOpenTextDocumentParams
 		if err := json.Unmarshal(rawParams, &params); err != nil {
 			return err
@@ -109,7 +118,7 @@ func main() {
 	})
 
 	m.HandleNotification(messages.DidChangeTextDocumentNotification, func(rawParams json.RawMessage) error {
-		log.Info("Received didChangeTextDocument notification")
+		logger.Info("Received didChangeTextDocument notification")
 		var params messages.DidChangeTextDocumentParams
 		if err := json.Unmarshal(rawParams, &params); err != nil {
 			return err
@@ -125,60 +134,45 @@ func main() {
 	})
 
 	m.HandleMethod("textDocument/hover", func(rawParams json.RawMessage) (any, error) {
-		log.Info("Received textDocument/hover request")
+		logger.Info("Received textDocument/hover request")
 		var params messages.HoverParams
 		if err := json.Unmarshal(rawParams, &params); err != nil {
 			return nil, err
 		}
 		text := fileURIToContents[params.TextDocument.URI]
-		kind, apiVersion, found := getKindAndApiVersion(text)
+		kind, apiVersion, found := schemas.GetKindApiVersion([]byte(text))
 		if !found {
 			return nil, errors.New("Not found")
 		}
-		schemaUrl := getExternalDocumentation(kind, apiVersion)
-		if schemaUrl == "" {
+		yamlPath, err := ast.GetPathAtPosition(params.Position.Line+1, params.Position.Character+1, text)
+		if err != nil {
+			logger.Error("Failed to get path at position", "line", params.Position.Line, "column", params.Position.Character)
 			return nil, errors.New("Not found")
 		}
-		resp, err := http.Get(schemaUrl)
-		if err != nil || resp.StatusCode != 200 {
-			return nil, errors.New("Not found")
-		}
-		defer resp.Body.Close()
-		decoded := make(map[string]interface{})
-		defer resp.Body.Close()
-		if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-			return nil, errors.New("Not found")
-		}
-		// Get the node that the cursor is on
-		// Get the path of that node
-		// Use JSONPath to get the corresponding node in the json schema
-		// Return the description of that node
-		word := getCurrentWord(params.Position, text)
-		properties := decoded["properties"].(map[string]interface{})
-		object, found := properties[word]
+		description, found := schemaStore.GetDescriptionFromKindApiVersion(kind, apiVersion, yamlPath)
 		if !found {
+			logger.Error("Failed to get description", "kind", kind, "apiVersion", apiVersion, "yamlPath", yamlPath)
 			return nil, errors.New("Not found")
 		}
-		description := object.(map[string]interface{})["description"]
 		return messages.HoverResult{
 			Contents: messages.MarkupContent{
 				Kind:  "markdown",
-				Value: description.(string),
+				Value: description,
 			},
 		}, nil
 	})
 
-	log.Info("Handler set up", "log_path", logpath)
+	logger.Info("Handler set up", "log_path", logpath)
 
 	go func() {
 		if err := m.Process(); err != nil {
-			log.Error("Processing stopped", "error", err)
+			logger.Error("Processing stopped", "error", err)
 			os.Exit(1)
 		}
 	}()
 
 	<-exitChannel
-	log.Info("Server exited")
+	logger.Info("Server exited")
 	os.Exit(1)
 }
 
