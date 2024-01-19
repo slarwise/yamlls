@@ -29,6 +29,17 @@ func (r Request) IsJSONRPC() bool {
 	return r.ProtocolVersion == protocolVersion
 }
 
+type OutgoingRequest struct {
+	ProtocolVersion string      `json:"jsonrpc"`
+	ID              string      `json:"id"`
+	Method          string      `json:"method"`
+	Params          interface{} `json:"params"`
+}
+
+func (r OutgoingRequest) IsJSONRPC() bool {
+	return r.ProtocolVersion == protocolVersion
+}
+
 func (r Request) IsNotification() bool {
 	return r.ID == nil
 }
@@ -188,6 +199,20 @@ func (m *Mux) Notify(method string, params any) error {
 		Params:          params,
 	}
 	return m.write(n)
+}
+
+func (m *Mux) Request(method string, params any) error {
+	r := OutgoingRequest{
+		ProtocolVersion: protocolVersion,
+		ID:              "1",
+		Method:          method,
+		Params:          params,
+	}
+	return m.write(r)
+}
+
+func ptr[T any](v T) *T {
+	return &v
 }
 
 func (m *Mux) write(msg Message) error {

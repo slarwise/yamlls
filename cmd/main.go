@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"regexp"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/slarwise/yamlls/pkg/lsp"
 	"github.com/slarwise/yamlls/pkg/messages"
 	"github.com/slarwise/yamlls/pkg/schemas"
+	"go.lsp.dev/protocol"
 	"gopkg.in/yaml.v3"
 )
 
@@ -65,10 +67,14 @@ func main() {
 		logger.Info("Received initialize request", "params", initializeParams)
 
 		result := messages.InitializeResult{
-			Capabilities: messages.ServerCapabilities{
+			Capabilities: protocol.ServerCapabilities{
 				TextDocumentSync:   messages.TextDocumentSyncKindFull,
-				CompletionProvider: &messages.CompletionOptions{TriggerCharacters: []string{":"}},
+				CompletionProvider: &protocol.CompletionOptions{TriggerCharacters: []string{":"}},
 				HoverProvider:      true,
+				CodeActionProvider: true,
+				ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
+					Commands: []string{"Open"},
+				},
 			},
 			ServerInfo: &messages.ServerInfo{
 				Name: "yamlls",
@@ -100,7 +106,6 @@ func main() {
 			fileURIToContents[doc.URI] = doc.Text
 			logger.Info("In channel goroutine", "fileURIToContents", fileURIToContents)
 			diagnostics := []messages.Diagnostic{}
-			diagnostics = append(diagnostics, getDocs(doc.Text)...) // TODO: Make this a codeAction, a documentLink or a showDocument
 			m.Notify(messages.PublishDiagnosticsMethod, messages.PublishDiagnosticsParams{
 				URI:         doc.URI,
 				Version:     &doc.Version,
@@ -205,6 +210,67 @@ func main() {
 			})
 		}
 		return result, nil
+	})
+
+	m.HandleMethod(protocol.MethodTextDocumentCodeAction, func(rawParams json.RawMessage) (any, error) {
+		logger.Info(fmt.Sprintf("Received %s request", protocol.MethodTextDocumentCodeAction))
+		var params protocol.CodeActionParams
+		if err := json.Unmarshal(rawParams, &params); err != nil {
+			return nil, err
+		}
+		text := fileURIToContents[string(params.TextDocument.URI)]
+		textBeforeCursor := strings.Split(text, "\n")
+		logger.Info("Code action", "start_range", params.Range.Start, "lines_in_document", len(textBeforeCursor), "filename", params.TextDocument.URI, "map", fileURIToContents)
+		textBeforeCursor = textBeforeCursor[:params.Range.Start.Line]
+		kind, apiVersion, found := schemas.GetKindApiVersion([]byte(strings.Join(textBeforeCursor, "\n")))
+		if !found {
+			logger.Error("Failed to get kind and apiVersion")
+			return nil, errors.New("Not found")
+		}
+		schemaURL := getExternalDocumentation(kind, apiVersion)
+		if schemaURL == "" {
+			return nil, err
+		}
+		viewerUrl := "https://json-schema.app/view/" + url.PathEscape("#") + "?url=" + url.QueryEscape(schemaURL)
+		response := []protocol.CodeAction{
+			{
+				Title: "Open external documentation",
+				Command: &protocol.Command{
+					Title:     "Open external documentation",
+					Command:   "external-docs",
+					Arguments: []interface{}{viewerUrl},
+				},
+			},
+		}
+		return response, nil
+	})
+
+	m.HandleMethod(protocol.MethodWorkspaceExecuteCommand, func(rawParams json.RawMessage) (any, error) {
+		logger.Info(fmt.Sprintf("Received %s request", protocol.MethodWorkspaceExecuteCommand))
+		var params protocol.ExecuteCommandParams
+		if err := json.Unmarshal(rawParams, &params); err != nil {
+			return nil, err
+		}
+		logger.Info("Received command", "command", params.Command, "args", params.Arguments)
+		switch params.Command {
+		case "external-docs":
+			viewerURL := params.Arguments[0].(string)
+			// TODO: Use showDocument instead
+			// Currently not in a Helix release, it was added on Jan 17
+			// https://github.com/helix-editor/helix/pull/8865
+			// showDocumentParams := protocol.ShowDocumentParams{
+			// 	URI:       uri.New(viewerURL),
+			// 	External:  true,
+			// 	TakeFocus: true,
+			// }
+			// m.Request("window/showDocument", showDocumentParams)
+			if err = exec.Command("open", viewerURL).Run(); err != nil {
+				logger.Error("Failed to execute command", "error", err)
+			}
+		default:
+			return "", fmt.Errorf("Command not found %s", params.Command)
+		}
+		return "", nil
 	})
 
 	logger.Info("Handler set up", "log_path", logpath)

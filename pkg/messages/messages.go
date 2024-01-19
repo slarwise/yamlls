@@ -1,5 +1,7 @@
 package messages
 
+import "go.lsp.dev/protocol"
+
 type InitializeParams struct {
 	// Information about the client
 	ClientInfo *ClientInfo `json:"clientInfo"`
@@ -18,8 +20,8 @@ type ClientCapabilities struct {
 
 type InitializeResult struct {
 	// The capabilities the language server provides.
-	Capabilities ServerCapabilities `json:"capabilities"`
-	ServerInfo   *ServerInfo        `json:"serverInfo"`
+	Capabilities protocol.ServerCapabilities `json:"capabilities"`
+	ServerInfo   *ServerInfo                 `json:"serverInfo"`
 }
 
 // https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#serverCapabilities
