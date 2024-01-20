@@ -12,10 +12,11 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/slarwise/yamlls/pkg/ast"
-	"github.com/slarwise/yamlls/pkg/lsp"
-	"github.com/slarwise/yamlls/pkg/messages"
-	"github.com/slarwise/yamlls/pkg/schemas"
+	"github.com/slarwise/yamlls/internal/ast"
+	"github.com/slarwise/yamlls/internal/lsp"
+	"github.com/slarwise/yamlls/internal/messages"
+	"github.com/slarwise/yamlls/internal/schemas"
+
 	"go.lsp.dev/protocol"
 	"gopkg.in/yaml.v3"
 )
