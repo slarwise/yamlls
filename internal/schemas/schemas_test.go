@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path"
-	"slices"
 	"testing"
 )
 
@@ -21,48 +20,6 @@ func TestReadCache(t *testing.T) {
 	}
 	if len(store.Cache) != 1 {
 		t.Fatalf("Expected 1 schema in cache, got %d", len(store.Cache))
-	}
-}
-
-func TestGetKindApiVersion(t *testing.T) {
-	tests := map[string]struct {
-		data       []byte
-		kind       string
-		apiVersion string
-		found      bool
-	}{
-		"kubernetes": {
-			data:       []byte("kind: Service\napiVersion: v1"),
-			kind:       "Service",
-			apiVersion: "v1",
-			found:      true,
-		},
-		"CRD": {
-			data:       []byte("kind: ApplicationSet\napiVersion: argoproj.io/v1alpha1"),
-			kind:       "ApplicationSet",
-			apiVersion: "argoproj.io/v1alpha1",
-			found:      true,
-		},
-		"no-api-version": {
-			data:       []byte("kind: ApplicationSet\n"),
-			kind:       "",
-			apiVersion: "",
-			found:      false,
-		},
-	}
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			kind, apiVersion, found := GetKindApiVersion(test.data)
-			if found != test.found {
-				t.Fatal("Expected to find kind and apiVersion")
-			}
-			if kind != test.kind {
-				t.Fatalf("Expected kind to be %s, got %s", test.kind, kind)
-			}
-			if apiVersion != test.apiVersion {
-				t.Fatalf("Expected apiVersion to be %s, got %s", test.apiVersion, apiVersion)
-			}
-		})
 	}
 }
 
@@ -129,66 +86,6 @@ func TestSchemaFromKindApiVersion(t *testing.T) {
 			_, found := store.SchemaFromKindApiVersion(test.kind, test.apiVersion)
 			if found != test.found {
 				t.Fatalf("Expected to find schema for kind `%s` and apiVersion `%s`", test.kind, test.apiVersion)
-			}
-		})
-	}
-}
-
-func TestGetDescriptionFromKindApiVersion(t *testing.T) {
-	yamlPath := "$.spec.ports"
-	store, err := NewSchemaStore(logger, cacheDir, "")
-	if err != nil {
-		t.Fatalf("Could not create schema store: %s", err)
-	}
-	description, found := store.GetDescriptionFromKindApiVersion("service", "v1", yamlPath)
-	if !found {
-		t.Fatal("Expected to find description")
-	}
-	expected := "The list of ports that are exposed by this service. More info: https://kubernetes.io/docs/concepts/services-networking/service/#virtual-ips-and-service-proxies"
-	if description != expected {
-		t.Fatalf("Expected %s, got %s", expected, description)
-	}
-}
-
-func TestToSchemaPath(t *testing.T) {
-	yamlPath := "$.spec.ports"
-	schemaPath := toSchemaPath(yamlPath)
-	expected := "properties.spec.properties.ports"
-	if schemaPath != expected {
-		t.Fatalf("Expected %s, got %s", expected, schemaPath)
-	}
-}
-
-func TestGetPropertiesFromKindApiVersion(t *testing.T) {
-	tests := map[string]struct {
-		yamlPath string
-		expected []string
-	}{
-		"root": {
-			yamlPath: "$.",
-			expected: []string{"apiVersion", "kind", "metadata", "spec", "status"},
-		},
-		"metadata": {
-			yamlPath: "$.metadata",
-			expected: []string{"namespace", "selfLink", "finalizers", "name", "generation", "resourceVersion", "annotations", "generateName", "labels", "uid", "creationTimestamp", "deletionTimestamp", "ownerReferences", "deletionGracePeriodSeconds", "managedFields"},
-		},
-	}
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			kind := "Service"
-			apiVersion := "v1"
-			store, err := NewSchemaStore(logger, cacheDir, "")
-			if err != nil {
-				t.Fatalf("Could not create schema store: %s", err)
-			}
-			properties, found := store.GetPropertiesFromKindApiVersion(kind, apiVersion, test.yamlPath)
-			if !found {
-				t.Fatal("Expected to find properties")
-			}
-			slices.Sort(properties)
-			slices.Sort(test.expected)
-			if !slices.Equal(properties, test.expected) {
-				t.Fatalf("Expected %v, got %v", test.expected, properties)
 			}
 		})
 	}

@@ -12,9 +12,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/slarwise/yamlls/internal/ast"
 	"github.com/slarwise/yamlls/internal/lsp"
 	"github.com/slarwise/yamlls/internal/messages"
+	"github.com/slarwise/yamlls/internal/parser"
 	"github.com/slarwise/yamlls/internal/schemas"
 
 	"go.lsp.dev/protocol"
@@ -148,17 +148,22 @@ func main() {
 			return nil, err
 		}
 		text := fileURIToContents[params.TextDocument.URI]
-		kind, apiVersion, found := schemas.GetKindApiVersion([]byte(text))
-		if !found {
+		kind, apiVersion := parser.GetKindApiVersion(text)
+		if kind == "" && apiVersion == "" {
 			logger.Error("Failed to get kind and apiVersion", "text", string(text))
 			return nil, errors.New("Not found")
 		}
-		yamlPath, err := ast.GetPathAtPosition(params.Position.Line+1, params.Position.Character+1, text)
+		yamlPath, err := parser.GetPathAtPosition(params.Position.Line+1, params.Position.Character+1, text)
 		if err != nil {
 			logger.Error("Failed to get path at position", "line", params.Position.Line, "column", params.Position.Character)
 			return nil, errors.New("Not found")
 		}
-		description, found := schemaStore.GetDescriptionFromKindApiVersion(kind, apiVersion, yamlPath)
+		schema, found := schemaStore.SchemaFromKindApiVersion(kind, apiVersion)
+		if !found {
+			logger.Error("Failed to get schema", "kind", kind, "apiVersion", apiVersion, "yamlPath", yamlPath)
+			return nil, errors.New("Not found")
+		}
+		description, found := parser.GetDescription(yamlPath, schema)
 		if !found {
 			logger.Error("Failed to get description", "kind", kind, "apiVersion", apiVersion, "yamlPath", yamlPath)
 			return nil, errors.New("Not found")
@@ -178,24 +183,27 @@ func main() {
 			return nil, err
 		}
 		text := fileURIToContents[params.TextDocument.URI]
-		textBeforeCursor := strings.Split(text, "\n")
-		textBeforeCursor = textBeforeCursor[:params.Position.Line]
-		kind, apiVersion, found := schemas.GetKindApiVersion([]byte(strings.Join(textBeforeCursor, "\n")))
-		if !found {
+		kind, apiVersion := parser.GetKindApiVersion(text)
+		if kind == "" || apiVersion == "" {
 			logger.Error("Failed to get kind and apiVersion")
 			return nil, errors.New("Not found")
 		}
 		// TODO: This fails when there is a syntax error, which it will be
 		// when you haven't finished writing the field name. Perhaps get the
 		// node with one less indent?
-		yamlPath, err := ast.GetPathAtPosition(params.Position.Line+1, params.Position.Character+1, text)
+		yamlPath, err := parser.GetPathAtPosition(params.Position.Line+1, params.Position.Character+1, text)
 		if err != nil {
 			logger.Error("Failed to get path at position", "line", params.Position.Line, "column", params.Position.Character)
 			return nil, errors.New("Not found")
 		}
-		parentPath := schemas.GetPathToParent(yamlPath)
+		parentPath := parser.GetPathToParent(yamlPath)
 		logger.Info("Computed parent path", "parent_path", parentPath)
-		properties, found := schemaStore.GetPropertiesFromKindApiVersion(kind, apiVersion, parentPath)
+		schema, found := schemaStore.SchemaFromKindApiVersion(kind, apiVersion)
+		if !found {
+			logger.Error("Failed to get schema", "kind", kind, "apiVersion", apiVersion, "yamlPath", yamlPath)
+			return nil, errors.New("Not found")
+		}
+		properties, found := parser.GetProperties(parentPath, schema)
 		if !found {
 			logger.Error("Failed to get properties", "yaml_path", yamlPath)
 			return nil, errors.New("Not found")
@@ -220,11 +228,8 @@ func main() {
 			return nil, err
 		}
 		text := fileURIToContents[string(params.TextDocument.URI)]
-		textBeforeCursor := strings.Split(text, "\n")
-		logger.Info("Code action", "start_range", params.Range.Start, "lines_in_document", len(textBeforeCursor), "filename", params.TextDocument.URI, "map", fileURIToContents)
-		textBeforeCursor = textBeforeCursor[:params.Range.Start.Line]
-		kind, apiVersion, found := schemas.GetKindApiVersion([]byte(strings.Join(textBeforeCursor, "\n")))
-		if !found {
+		kind, apiVersion := parser.GetKindApiVersion(text)
+		if kind == "" || apiVersion == "" {
 			logger.Error("Failed to get kind and apiVersion")
 			return nil, errors.New("Not found")
 		}

@@ -1,7 +1,6 @@
 package schemas
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,11 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"regexp"
 	"strings"
-
-	"github.com/goccy/go-yaml"
-	"github.com/tidwall/gjson"
 )
 
 const (
@@ -57,26 +52,6 @@ type SchemaStore struct {
 	Logger   *slog.Logger
 }
 
-func GetKindApiVersion(data []byte) (string, string, bool) {
-	kindPath, err := yaml.PathString("$.kind")
-	if err != nil {
-		panic("Could not build yaml path for kind")
-	}
-	apiVersionPath, err := yaml.PathString("$.apiVersion")
-	if err != nil {
-		panic("Could not build yaml path for apiVersion")
-	}
-	var kind string
-	if err := kindPath.Read(bytes.NewReader(data), &kind); err != nil {
-		return "", "", false
-	}
-	var apiVersion string
-	if err := apiVersionPath.Read(bytes.NewReader(data), &apiVersion); err != nil {
-		return "", "", false
-	}
-	return kind, apiVersion, true
-}
-
 func (s *SchemaStore) SchemaFromFilePath(path string) ([]byte, error) {
 	panic("Not implemented")
 }
@@ -116,70 +91,4 @@ func (s *SchemaStore) SchemaFromKindApiVersion(kind string, apiVersion string) (
 
 func schemaKeyFromKindApiVersion(kind string, apiVersion string) string {
 	return strings.ToLower(fmt.Sprintf("%s-%s", kind, strings.ReplaceAll(apiVersion, "/", "-")))
-}
-
-func (s *SchemaStore) GetDescriptionFromKindApiVersion(kind string, apiVersion string, yamlPath string) (string, bool) {
-	schema, found := s.SchemaFromKindApiVersion(kind, apiVersion)
-	if !found {
-		s.Logger.Info("Could not find schema", "kind", kind, "apiVersion", apiVersion)
-		return "", false
-	}
-	path := toSchemaPath(yamlPath)
-	path = path + ".description"
-	s.Logger.Info("Description", "yaml_path", yamlPath, "description_path", path)
-	result := gjson.GetBytes(schema, path)
-	if !result.Exists() {
-		s.Logger.Error("Failed to get description", "yaml_path", yamlPath, "description_path", path)
-		return "", false
-	}
-	return result.String(), true
-}
-
-func toSchemaPath(yamlPath string) string {
-	schemaPath := strings.TrimPrefix(yamlPath, "$.")
-	if schemaPath == "" {
-		return ""
-	}
-	schemaPath = strings.ReplaceAll(schemaPath, ".", ".properties.")
-	// Replace [\d+] with .items.
-	regex := regexp.MustCompile(`\[\d+\]\.`)
-	schemaPath = regex.ReplaceAllString(schemaPath, ".items.")
-	return "properties." + schemaPath
-}
-
-// Completion
-// - TODO: Enum values
-// - Field properties
-func (s *SchemaStore) GetPropertiesFromKindApiVersion(kind string, apiVersion string, yamlPath string) ([]string, bool) {
-	schema, found := s.SchemaFromKindApiVersion(kind, apiVersion)
-	if !found {
-		s.Logger.Info("Could not find schema", "kind", kind, "apiVersion", apiVersion)
-		return nil, false
-	}
-	schemaPath := toSchemaPath(yamlPath)
-	propertiesPath := ""
-	if schemaPath == "" {
-		propertiesPath = "properties|@keys"
-	} else {
-		propertiesPath = schemaPath + ".properties|@keys"
-	}
-	s.Logger.Info("propertiesPath", "propertiesPath", propertiesPath)
-	result := gjson.GetBytes(schema, propertiesPath)
-	if !result.Exists() {
-		s.Logger.Error("Failed to get properties", "yaml_path", yamlPath, "properties_path", propertiesPath)
-		return nil, false
-	}
-	keys := []string{}
-	for _, k := range result.Array() {
-		keys = append(keys, k.Str)
-	}
-	return keys, true
-}
-
-func GetPathToParent(yamlPath string) string {
-	if yamlPath == "$." {
-		return "$."
-	}
-	nodes := strings.Split(yamlPath, ".")
-	return strings.Join(nodes[:len(nodes)-1], ".")
 }

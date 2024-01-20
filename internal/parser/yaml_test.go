@@ -1,4 +1,4 @@
-package ast
+package parser
 
 import (
 	"testing"
@@ -20,5 +20,14 @@ func TestGetTokenAtPosition(t *testing.T) {
 	}
 	if path != "$.spec" {
 		t.Fatalf("Expected path to be `$.spec`, got %s\n", path)
+	}
+}
+
+func TestToSchemaPath(t *testing.T) {
+	yamlPath := "$.spec.ports"
+	schemaPath := toSchemaPath(yamlPath)
+	expected := "properties.spec.properties.ports"
+	if schemaPath != expected {
+		t.Fatalf("Expected %s, got %s", expected, schemaPath)
 	}
 }
