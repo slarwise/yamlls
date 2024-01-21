@@ -10,8 +10,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// Lines and columns are 1-indexed
-func GetPathAtPosition(line int, column int, text string) (string, error) {
+func GetPathAtPosition(line uint32, column uint32, text string) (string, error) {
 	f, err := parser.ParseBytes([]byte(text), 0)
 	if err != nil {
 		return "", err
@@ -30,9 +29,9 @@ func GetPathAtPosition(line int, column int, text string) (string, error) {
 
 type pathCapturer struct {
 	Paths        []string
-	Lines        []int // 1-indexed
-	StartColumns []int // 1-indexed
-	EndColumns   []int
+	Lines        []uint32 // 0-indexed
+	StartColumns []uint32 // 0-indexed
+	EndColumns   []uint32
 }
 
 func (c *pathCapturer) Visit(node ast.Node) ast.Visitor {
@@ -41,11 +40,11 @@ func (c *pathCapturer) Visit(node ast.Node) ast.Visitor {
 	// }
 	c.Paths = append(c.Paths, node.GetPath())
 	token := node.GetToken()
-	c.Lines = append(c.Lines, token.Position.Line)
+	c.Lines = append(c.Lines, uint32(token.Position.Line))
 	startColumn := token.Position.Column
-	c.StartColumns = append(c.StartColumns, startColumn)
+	c.StartColumns = append(c.StartColumns, uint32(startColumn))
 	endColumn := startColumn + len(token.Value)
-	c.EndColumns = append(c.EndColumns, endColumn)
+	c.EndColumns = append(c.EndColumns, uint32(endColumn))
 	return c
 }
 

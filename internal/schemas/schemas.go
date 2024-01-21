@@ -92,3 +92,14 @@ func (s *SchemaStore) SchemaFromKindApiVersion(kind string, apiVersion string) (
 func schemaKeyFromKindApiVersion(kind string, apiVersion string) string {
 	return strings.ToLower(fmt.Sprintf("%s-%s", kind, strings.ReplaceAll(apiVersion, "/", "-")))
 }
+
+func (s *SchemaStore) DocsViewerURL(kind string, apiVersion string) (string, error) {
+	yannhKey := strings.ToLower(fmt.Sprintf("%s-%s", kind, strings.ReplaceAll(apiVersion, "/", "-")))
+	schemaURL, err := url.JoinPath(s.URL, "yannh/kubernetes-json-schema/master/master-standalone-strict", yannhKey+".json")
+	if err != nil {
+		s.Logger.Info("Could not build URL", "kind", kind, "apiVersion", apiVersion, "error", err)
+		return "", err
+	}
+	return "https://json-schema.app/view/" + url.PathEscape("#") + "?url=" + url.QueryEscape(schemaURL), nil
+
+}
