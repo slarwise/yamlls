@@ -10,7 +10,6 @@ import (
 	"path"
 
 	"github.com/slarwise/yamlls/internal/lsp"
-	"github.com/slarwise/yamlls/internal/messages"
 	"github.com/slarwise/yamlls/internal/parser"
 	"github.com/slarwise/yamlls/internal/schemas"
 
@@ -164,8 +163,8 @@ func main() {
 			logger.Error("Failed to get description", "kind", kind, "apiVersion", apiVersion, "yamlPath", yamlPath)
 			return nil, errors.New("Not found")
 		}
-		return messages.HoverResult{
-			Contents: messages.MarkupContent{
+		return protocol.Hover{
+			Contents: protocol.MarkupContent{
 				Kind:  "markdown",
 				Value: description,
 			},

@@ -12,8 +12,8 @@ spec:
       app: myapp`
 
 func TestGetTokenAtPosition(t *testing.T) {
-	var line uint32 = 3
-	var column uint32 = 4
+	var line uint32 = 2
+	var column uint32 = 3
 	path, err := GetPathAtPosition(line, column, yml)
 	if err != nil {
 		t.Fatal(err)
