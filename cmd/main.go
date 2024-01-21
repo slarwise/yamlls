@@ -149,7 +149,7 @@ func main() {
 			logger.Error("Failed to get kind and apiVersion", "text", string(text))
 			return nil, errors.New("Not found")
 		}
-		yamlPath, err := parser.GetPathAtPosition(params.Position.Line+1, params.Position.Character+1, text)
+		yamlPath, err := parser.GetPathAtPosition(params.Position.Line, params.Position.Character, text)
 		if err != nil {
 			logger.Error("Failed to get path at position", "line", params.Position.Line, "column", params.Position.Character)
 			return nil, errors.New("Not found")
@@ -187,7 +187,7 @@ func main() {
 		// TODO: This fails when there is a syntax error, which it will be
 		// when you haven't finished writing the field name. Perhaps get the
 		// node with one less indent?
-		yamlPath, err := parser.GetPathAtPosition(params.Position.Line+1, params.Position.Character+1, text)
+		yamlPath, err := parser.GetPathAtPosition(params.Position.Line, params.Position.Character, text)
 		if err != nil {
 			logger.Error("Failed to get path at position", "line", params.Position.Line, "column", params.Position.Character)
 			return nil, errors.New("Not found")
@@ -223,7 +223,7 @@ func main() {
 		if err := json.Unmarshal(rawParams, &params); err != nil {
 			return nil, err
 		}
-		text := filenameToContents[string(params.TextDocument.URI)]
+		text := filenameToContents[params.TextDocument.URI.Filename()]
 		kind, apiVersion := parser.GetKindApiVersion(text)
 		if kind == "" || apiVersion == "" {
 			logger.Error("Failed to get kind and apiVersion")

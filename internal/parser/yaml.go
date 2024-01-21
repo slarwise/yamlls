@@ -40,8 +40,8 @@ func (c *pathCapturer) Visit(node ast.Node) ast.Visitor {
 	// }
 	c.Paths = append(c.Paths, node.GetPath())
 	token := node.GetToken()
-	c.Lines = append(c.Lines, uint32(token.Position.Line))
-	startColumn := token.Position.Column
+	c.Lines = append(c.Lines, uint32(token.Position.Line-1))
+	startColumn := token.Position.Column - 1
 	c.StartColumns = append(c.StartColumns, uint32(startColumn))
 	endColumn := startColumn + len(token.Value)
 	c.EndColumns = append(c.EndColumns, uint32(endColumn))
