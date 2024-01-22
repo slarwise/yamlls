@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"strings"
 
 	"github.com/slarwise/yamlls/internal/lsp"
 	"github.com/slarwise/yamlls/internal/parser"
@@ -105,7 +106,11 @@ func main() {
 			logger.Info("In channel goroutine", "fileURIToContents", filenameToContents)
 			diagnostics := []protocol.Diagnostic{}
 			// TODO: Verify that the document is valid yaml before validating against schema
-			diagnostics = append(diagnostics, validateAgainstSchema(schemaStore, doc.URI.Filename(), doc.Text)...)
+			validYamlDiagnostics := isValidYaml(doc.Text)
+			diagnostics = append(diagnostics, validYamlDiagnostics...)
+			if len(validYamlDiagnostics) == 0 {
+				diagnostics = append(diagnostics, validateAgainstSchema(schemaStore, doc.URI.Filename(), doc.Text)...)
+			}
 			m.Notify(protocol.MethodTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 				URI:         doc.URI,
 				Version:     uint32(doc.Version),
@@ -353,4 +358,29 @@ func validateAgainstSchema(store schemas.SchemaStore, filename string, text stri
 		diagnostics = append(diagnostics, d)
 	}
 	return diagnostics
+}
+
+func isValidYaml(text string) []protocol.Diagnostic {
+	ds := []protocol.Diagnostic{}
+	var output interface{}
+	lines := strings.Split(text, "\n")
+	if err := yaml.Unmarshal([]byte(text), &output); err != nil {
+		d := protocol.Diagnostic{
+			Range: protocol.Range{
+				Start: protocol.Position{
+					Line:      0,
+					Character: 0,
+				},
+				End: protocol.Position{
+					Line:      uint32(len(lines) - 1),
+					Character: uint32(len(lines[len(lines)-1])),
+				},
+			},
+			Severity: protocol.DiagnosticSeverityError,
+			Source:   "yamlls",
+			Message:  "Invalid yaml",
+		}
+		ds = append(ds, d)
+	}
+	return ds
 }
