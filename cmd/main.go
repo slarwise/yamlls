@@ -45,7 +45,7 @@ func main() {
 		logger.Error("Failed to create `yamlls/schemas` dir in cache directory", "cache_dir", cacheDir, "error", err)
 		os.Exit(1)
 	}
-	schemaStore, err := schemas.NewSchemaStore(logger, schemasDir, "https://raw.githubusercontent.com")
+	schemaStore, err := schemas.NewSchemaStore(logger, schemasDir)
 	if err != nil {
 		logger.Error("Failed to create schema store", "error", err)
 		os.Exit(1)
@@ -143,9 +143,9 @@ func main() {
 			return nil, err
 		}
 		text := filenameToContents[params.TextDocument.URI.Filename()]
-		kind, apiVersion := parser.GetKindApiVersion(text)
-		if kind == "" && apiVersion == "" {
-			logger.Error("Failed to get kind and apiVersion", "text", string(text))
+		schema, found := resolveSchema(schemaStore, params.TextDocument.URI.Filename(), text)
+		if !found {
+			logger.Error("Could not find schema", "filename", params.TextDocument.URI.Filename())
 			return nil, errors.New("Not found")
 		}
 		yamlPath, err := parser.GetPathAtPosition(params.Position.Line, params.Position.Character, text)
@@ -153,14 +153,9 @@ func main() {
 			logger.Error("Failed to get path at position", "line", params.Position.Line, "column", params.Position.Character)
 			return nil, errors.New("Not found")
 		}
-		schema, found := schemaStore.SchemaFromKindApiVersion(kind, apiVersion)
-		if !found {
-			logger.Error("Failed to get schema", "kind", kind, "apiVersion", apiVersion, "yamlPath", yamlPath)
-			return nil, errors.New("Not found")
-		}
 		description, found := parser.GetDescription(yamlPath, schema)
 		if !found {
-			logger.Error("Failed to get description", "kind", kind, "apiVersion", apiVersion, "yamlPath", yamlPath)
+			logger.Error("Failed to get description", "yamlPath", yamlPath)
 			return nil, errors.New("Not found")
 		}
 		return protocol.Hover{
@@ -178,9 +173,9 @@ func main() {
 			return nil, err
 		}
 		text := filenameToContents[params.TextDocument.URI.Filename()]
-		kind, apiVersion := parser.GetKindApiVersion(text)
-		if kind == "" || apiVersion == "" {
-			logger.Error("Failed to get kind and apiVersion")
+		schema, found := resolveSchema(schemaStore, params.TextDocument.URI.Filename(), text)
+		if !found {
+			logger.Error("Could not find schema", "filename", params.TextDocument.URI.Filename())
 			return nil, errors.New("Not found")
 		}
 		// TODO: This fails when there is a syntax error, which it will be
@@ -193,11 +188,6 @@ func main() {
 		}
 		parentPath := parser.GetPathToParent(yamlPath)
 		logger.Info("Computed parent path", "parent_path", parentPath)
-		schema, found := schemaStore.SchemaFromKindApiVersion(kind, apiVersion)
-		if !found {
-			logger.Error("Failed to get schema", "kind", kind, "apiVersion", apiVersion, "yamlPath", yamlPath)
-			return nil, errors.New("Not found")
-		}
 		properties, found := parser.GetProperties(parentPath, schema)
 		if !found {
 			logger.Error("Failed to get properties", "yaml_path", yamlPath)
@@ -223,15 +213,12 @@ func main() {
 			return nil, err
 		}
 		text := filenameToContents[params.TextDocument.URI.Filename()]
-		kind, apiVersion := parser.GetKindApiVersion(text)
-		if kind == "" || apiVersion == "" {
-			logger.Error("Failed to get kind and apiVersion")
+		schemaURL, found := resolveSchemaURL(schemaStore, params.TextDocument.URI.Filename(), text)
+		if !found {
+			logger.Error("Could not find schema", "filename", params.TextDocument.URI.Filename())
 			return nil, errors.New("Not found")
 		}
-		viewerURL, err := schemaStore.DocsViewerURL(kind, apiVersion)
-		if err != nil {
-			return nil, errors.New("Not found")
-		}
+		viewerURL := schemas.DocsViewerURL(schemaURL)
 		response := []protocol.CodeAction{
 			{
 				Title: "Open external documentation",
@@ -285,4 +272,36 @@ func main() {
 	<-exitChannel
 	logger.Info("Server exited")
 	os.Exit(1)
+}
+
+func resolveSchema(store schemas.SchemaStore, filename string, text string) ([]byte, bool) {
+	schema, err := store.SchemaFromFilePath(filename)
+	if err == nil {
+		return schema, true
+	}
+	kind, apiVersion := parser.GetKindApiVersion(text)
+	if kind == "" || apiVersion == "" {
+		return []byte{}, false
+	}
+	schema, found := store.SchemaFromKindApiVersion(kind, apiVersion)
+	if !found {
+		return []byte{}, false
+	}
+	return schema, true
+}
+
+func resolveSchemaURL(store schemas.SchemaStore, filename string, text string) (string, bool) {
+	url, err := store.SchemaURLFromFilePath(filename)
+	if err == nil {
+		return url, true
+	}
+	kind, apiVersion := parser.GetKindApiVersion(text)
+	if kind == "" || apiVersion == "" {
+		return "", false
+	}
+	url, err = store.SchemaURLFromKindApiVersion(kind, apiVersion)
+	if err != nil {
+		return "", false
+	}
+	return url, true
 }

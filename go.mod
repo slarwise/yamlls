@@ -3,8 +3,9 @@ module github.com/slarwise/yamlls
 go 1.21.5
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.6.1
 	github.com/tidwall/gjson v1.17.0
-	gopkg.in/yaml.v3 v3.0.1
+	go.lsp.dev/protocol v0.12.0
 )
 
 require (
@@ -14,11 +15,11 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	go.lsp.dev/jsonrpc2 v0.10.0 // indirect
 	go.lsp.dev/pkg v0.0.0-20210717090340-384b27a52fb2 // indirect
-	go.lsp.dev/protocol v0.12.0 // indirect
 	go.lsp.dev/uri v0.3.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
 	go.uber.org/zap v1.21.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 require (
