@@ -13,6 +13,8 @@ import (
 	"github.com/slarwise/yamlls/internal/parser"
 	"github.com/slarwise/yamlls/internal/schemas"
 
+	"github.com/goccy/go-yaml"
+	"github.com/xeipuuv/gojsonschema"
 	"go.lsp.dev/protocol"
 )
 
@@ -102,6 +104,8 @@ func main() {
 			filenameToContents[doc.URI.Filename()] = doc.Text
 			logger.Info("In channel goroutine", "fileURIToContents", filenameToContents)
 			diagnostics := []protocol.Diagnostic{}
+			// TODO: Verify that the document is valid yaml before validating against schema
+			diagnostics = append(diagnostics, validateAgainstSchema(schemaStore, doc.URI.Filename(), doc.Text)...)
 			m.Notify(protocol.MethodTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 				URI:         doc.URI,
 				Version:     uint32(doc.Version),
@@ -304,4 +308,49 @@ func resolveSchemaURL(store schemas.SchemaStore, filename string, text string) (
 		return "", false
 	}
 	return url, true
+}
+
+func validateAgainstSchema(store schemas.SchemaStore, filename string, text string) []protocol.Diagnostic {
+	diagnostics := []protocol.Diagnostic{}
+	schema, found := resolveSchema(store, filename, text)
+	if !found {
+		store.Logger.Error("Could not resolve schema")
+		return diagnostics
+	}
+	jsonText, err := yaml.YAMLToJSON([]byte(text))
+	if err != nil {
+		store.Logger.Error("Failed to convert yaml to json")
+		return diagnostics
+	}
+	schemaLoader := gojsonschema.NewBytesLoader(schema)
+	documentLoader := gojsonschema.NewBytesLoader(jsonText)
+	result, err := gojsonschema.Validate(schemaLoader, documentLoader)
+	if err != nil {
+		store.Logger.Error("Failed to validate against schema", "error", err)
+		return diagnostics
+	}
+	if result.Valid() {
+		store.Logger.Info("No errors found when validating")
+		return diagnostics
+	}
+	for _, e := range result.Errors() {
+		store.Logger.Info("context", "context", e.Context(), "details", e.Details(), "field", e.Field(), "type", e.Type())
+		d := protocol.Diagnostic{
+			Range: protocol.Range{
+				Start: protocol.Position{
+					Line:      0,
+					Character: 0,
+				},
+				End: protocol.Position{
+					Line:      1,
+					Character: 0,
+				},
+			},
+			Severity: protocol.DiagnosticSeverityError,
+			Source:   "yamlls",
+			Message:  e.Description(),
+		}
+		diagnostics = append(diagnostics, d)
+	}
+	return diagnostics
 }
