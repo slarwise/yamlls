@@ -71,7 +71,7 @@ func main() {
 				HoverProvider:      true,
 				CodeActionProvider: true,
 				ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
-					Commands: []string{"Open"},
+					Commands: []string{"external-docs"},
 				},
 			},
 			ServerInfo: &protocol.ServerInfo{
@@ -228,9 +228,9 @@ func main() {
 		viewerURL := schemas.DocsViewerURL(schemaURL)
 		response := []protocol.CodeAction{
 			{
-				Title: "Open external documentation",
+				Title: "Open documentation",
 				Command: &protocol.Command{
-					Title:     "Open external documentation",
+					Title:     "Open documentation",
 					Command:   "external-docs",
 					Arguments: []interface{}{viewerURL},
 				},
@@ -248,6 +248,10 @@ func main() {
 		logger.Info("Received command", "command", params.Command, "args", params.Arguments)
 		switch params.Command {
 		case "external-docs":
+			if len(params.Arguments) != 1 {
+				logger.Info("Must provide 1 argument to external-docs, the viewerURL")
+				return "", fmt.Errorf("Must provide 1 argument to external-docs, the viewerURL")
+			}
 			viewerURL := params.Arguments[0].(string)
 			// TODO: Use showDocument instead
 			// Currently not in a Helix release, it was added on Jan 17
