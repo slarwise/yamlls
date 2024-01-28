@@ -68,7 +68,6 @@ func main() {
 		result := protocol.InitializeResult{
 			Capabilities: protocol.ServerCapabilities{
 				TextDocumentSync:   protocol.TextDocumentSyncKindFull,
-				CompletionProvider: &protocol.CompletionOptions{TriggerCharacters: []string{":"}},
 				HoverProvider:      true,
 				CodeActionProvider: true,
 				ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
