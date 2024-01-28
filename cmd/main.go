@@ -104,7 +104,6 @@ func main() {
 			filenameToContents[doc.URI.Filename()] = doc.Text
 			logger.Info("In channel goroutine", "fileURIToContents", filenameToContents)
 			diagnostics := []protocol.Diagnostic{}
-			// TODO: Verify that the document is valid yaml before validating against schema
 			validYamlDiagnostics := isValidYaml(doc.Text)
 			diagnostics = append(diagnostics, validYamlDiagnostics...)
 			if len(validYamlDiagnostics) == 0 {
@@ -283,31 +282,29 @@ func main() {
 }
 
 func resolveSchema(store schemas.SchemaStore, filename string, text string) ([]byte, bool) {
-	schema, err := store.SchemaFromFilePath(filename)
-	if err == nil {
-		return schema, true
-	}
 	kind, apiVersion := parser.GetKindApiVersion(text)
-	if kind == "" || apiVersion == "" {
-		return []byte{}, false
+	if kind != "" && apiVersion != "" {
+		schema, found := store.SchemaFromKindApiVersion(kind, apiVersion)
+		if found {
+			return schema, true
+		}
 	}
-	schema, found := store.SchemaFromKindApiVersion(kind, apiVersion)
-	if !found {
+	schema, err := store.SchemaFromFilePath(filename)
+	if err != nil {
 		return []byte{}, false
 	}
 	return schema, true
 }
 
 func resolveSchemaURL(store schemas.SchemaStore, filename string, text string) (string, bool) {
-	url, err := store.SchemaURLFromFilePath(filename)
-	if err == nil {
-		return url, true
-	}
 	kind, apiVersion := parser.GetKindApiVersion(text)
-	if kind == "" || apiVersion == "" {
-		return "", false
+	if kind != "" && apiVersion != "" {
+		url, err := store.SchemaURLFromKindApiVersion(kind, apiVersion)
+		if err == nil {
+			return url, true
+		}
 	}
-	url, err = store.SchemaURLFromKindApiVersion(kind, apiVersion)
+	url, err := store.SchemaURLFromFilePath(filename)
 	if err != nil {
 		return "", false
 	}
