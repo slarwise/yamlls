@@ -22,5 +22,7 @@ func GetKindApiVersion(text string) (string, string) {
 			apiVersion = apiVersionMatch[1]
 		}
 	}
+	kind = strings.Trim(kind, `"`)
+	apiVersion = strings.Trim(apiVersion, `"`)
 	return kind, apiVersion
 }
