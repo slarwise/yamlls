@@ -1,0 +1,5 @@
+kind: ClusterPolicy
+apiVersion: kyverno.io/v1
+spec:
+  rules:
+    - name: hej
