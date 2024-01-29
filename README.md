@@ -46,6 +46,10 @@
 - [ ] Workspace: If there is an kustomization file, connect the resources
       somehow? And give info if there are things that don't match
 
+## Bugs
+
+- Can't get description of anyOf, such as github workflow jobs.something.runs-on
+
 ## Credits
 
 The first version of this repo was basically copied from
