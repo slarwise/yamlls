@@ -303,8 +303,8 @@ func resolveSchema(store schemas.SchemaStore, filename string, text string) ([]b
 func resolveSchemaURL(store schemas.SchemaStore, filename string, text string) (string, bool) {
 	kind, apiVersion := parser.GetKindApiVersion(text)
 	if kind != "" && apiVersion != "" {
-		URL := store.SchemaURLFromKindApiVersion(kind, apiVersion)
-		if URL != "" {
+		URL, err := store.SchemaURLFromKindApiVersion(kind, apiVersion)
+		if err == nil {
 			return URL, true
 		}
 	}
@@ -335,7 +335,6 @@ func validateAgainstSchema(store schemas.SchemaStore, filename string, text stri
 		return diagnostics
 	}
 	if result.Valid() {
-		store.Logger.Info("No errors found when validating")
 		return diagnostics
 	}
 	for _, e := range result.Errors() {

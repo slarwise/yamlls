@@ -33,10 +33,18 @@ func NewSchemaStore(logger *slog.Logger, cacheDir string) (SchemaStore, error) {
 		}
 		cache[key] = schema
 	}
+	kindApiVersionStore, err := NewKindApiVersionStore(filepath.Join(cacheDir, "kind-api-version"))
+	if err != nil {
+		return SchemaStore{}, err
+	}
+	fileMatchStore, err := NewFileMatchStore(filepath.Join(cacheDir, "filematch"))
+	if err != nil {
+		return SchemaStore{}, err
+	}
 	return SchemaStore{
 		Logger:              logger,
-		KindApiVersionStore: NewKindApiVersionStore(filepath.Join(cacheDir, "kubernetes")),
-		FileMatchStore:      NewFileMatchStore(filepath.Join(cacheDir, "json")),
+		KindApiVersionStore: kindApiVersionStore,
+		FileMatchStore:      fileMatchStore,
 	}, nil
 }
 
@@ -79,8 +87,12 @@ func (s *SchemaStore) SchemaFromKindApiVersion(kind string, apiVersion string) (
 	return schema, true
 }
 
-func (s *SchemaStore) SchemaURLFromKindApiVersion(kind string, apiVersion string) string {
-	return s.KindApiVersionStore.GetSchemaURL(kind, apiVersion)
+func (s *SchemaStore) SchemaURLFromKindApiVersion(kind string, apiVersion string) (string, error) {
+	URL, err := s.KindApiVersionStore.GetSchemaURL(kind, apiVersion)
+	if err != nil {
+		return "", errors.New("Schema not found")
+	}
+	return URL, nil
 }
 
 func DocsViewerURL(schemaURL string) string {

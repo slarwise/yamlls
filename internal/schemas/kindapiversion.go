@@ -1,21 +1,52 @@
 package schemas
 
 import (
+	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 	"path"
+	"regexp"
+	"slices"
 	"strings"
 )
 
-func NewKindApiVersionStore(cacheDir string) KindApiVersionStore {
-	return KindApiVersionStore{
-		CacheDir: cacheDir,
-		cache:    map[string]Schema{},
+func NewKindApiVersionStore(cacheDir string) (KindApiVersionStore, error) {
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return KindApiVersionStore{}, fmt.Errorf("Could not create cache dir: %s", err)
 	}
+	URLs, err := kindApiVersionURLs()
+	if err != nil {
+		return KindApiVersionStore{}, fmt.Errorf("Failed to get schema URLs: %s", err)
+	}
+	cache := map[string]Schema{}
+	cachedSchemas, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return KindApiVersionStore{}, fmt.Errorf("Could not read cache dir: %s", err)
+	}
+	for _, file := range cachedSchemas {
+		filename := path.Join(cacheDir, file.Name())
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			return KindApiVersionStore{}, fmt.Errorf("Failed to read schema file from cache: %s", err)
+		}
+		cache[file.Name()] = Schema{
+			Schema:   data,
+			URL:      "", // TODO: Can we get the URL here?
+			Filename: filename,
+		}
+	}
+	return KindApiVersionStore{
+		CacheDir:   cacheDir,
+		cache:      cache,
+		schemaURLs: URLs,
+	}, nil
 }
 
 type KindApiVersionStore struct {
-	CacheDir string
-	cache    map[string]Schema
+	CacheDir   string
+	cache      map[string]Schema
+	schemaURLs []string
 }
 
 func (s *KindApiVersionStore) GetSchema(kind string, apiVersion string) ([]byte, error) {
@@ -25,6 +56,9 @@ func (s *KindApiVersionStore) GetSchema(kind string, apiVersion string) ([]byte,
 		return schema.Schema, nil
 	}
 	URL := buildKindApiVersionURL(kind, apiVersion)
+	if !slices.Contains(s.schemaURLs, URL) {
+		return []byte{}, fmt.Errorf("Schema URL not valid: %s", URL)
+	}
 	data, err := callTheInternet(URL)
 	if err != nil {
 		return nil, err
@@ -35,12 +69,92 @@ func (s *KindApiVersionStore) GetSchema(kind string, apiVersion string) ([]byte,
 		URL:      URL,
 		Filename: filename,
 	}
+	log.Printf("filename %s", filename)
+	if err := os.WriteFile(filename, data, 0644); err != nil {
+		return []byte{}, fmt.Errorf("Could not write schema to cache dir: %s", err)
+	}
 	return data, nil
 }
 
-// Should this function verify that the URL exists?
-func (s *KindApiVersionStore) GetSchemaURL(kind string, apiVersion string) string {
-	return buildKindApiVersionURL(kind, apiVersion)
+func kindApiVersionURLs() ([]string, error) {
+	kubernetesURLs, err := getKubernetesURLs()
+	if err != nil {
+		return []string{}, fmt.Errorf("Failed to get kubernetes URLs: %s", err)
+	}
+	CRDUrls, err := getCRDURLs()
+	if err != nil {
+		return []string{}, fmt.Errorf("Failed to get CRD URLs: %s", err)
+	}
+	URLs := append(kubernetesURLs, CRDUrls...)
+	return URLs, nil
+}
+
+func getKubernetesURLs() ([]string, error) {
+	URL := "https://api.github.com/repos/yannh/kubernetes-json-schema/contents/master-standalone-strict"
+	data, err := callTheInternet(URL)
+	if err != nil {
+		return []string{}, fmt.Errorf("Failed to call github contents api: %s", err)
+	}
+	files := []struct {
+		DownloadURL string `json:"download_url"`
+	}{}
+	if err := json.Unmarshal(data, &files); err != nil {
+		return []string{}, fmt.Errorf("Failed to unmarshal github api contents response: %s", err)
+	}
+	URLs := []string{}
+	for _, f := range files {
+		URLs = append(URLs, f.DownloadURL)
+	}
+	return URLs, nil
+}
+
+var crdFilePattern = regexp.MustCompile(`^\w+(\.\w+)+/.+\.json$`)
+
+// Example: monitoring.coreos.com/alertmanager_v1.json
+func isCRDFile(filename string) bool {
+	return crdFilePattern.MatchString(filename)
+}
+
+func getCRDURLs() ([]string, error) {
+	URL := "https://api.github.com/repos/datreeio/CRDs-catalog/git/trees/main?recursive=true"
+	data, err := callTheInternet(URL)
+	if err != nil {
+		return []string{}, err
+	}
+	treeResponse := struct {
+		Files []struct {
+			Path string `json:"path"`
+			Type string `json:"type"`
+		} `json:"tree"`
+	}{}
+	if err := json.Unmarshal(data, &treeResponse); err != nil {
+		return []string{}, fmt.Errorf("Failed to unmarshal github tree response: %s, body: %s", err, string(data))
+	}
+	URLs := []string{}
+	for _, f := range treeResponse.Files {
+		if f.Type != "blob" {
+			continue
+		}
+		if isCRDFile(f.Path) {
+			URL := fmt.Sprintf("https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/%s", f.Path)
+			URLs = append(URLs, URL)
+		}
+	}
+	return URLs, nil
+}
+
+func (s *KindApiVersionStore) GetSchemaURL(kind string, apiVersion string) (string, error) {
+	URL := buildKindApiVersionURL(kind, apiVersion)
+	if !slices.Contains(s.schemaURLs, URL) {
+		return "", fmt.Errorf("Schema URL not valid: %s", URL)
+	}
+	key := kindApiVersionKey(kind, apiVersion)
+	cachedSchema, found := s.cache[key]
+	if found && cachedSchema.URL == "" {
+		cachedSchema.URL = URL
+		s.cache[key] = cachedSchema
+	}
+	return URL, nil
 }
 
 func kindApiVersionKey(kind string, apiVersion string) string {
