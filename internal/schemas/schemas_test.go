@@ -11,43 +11,6 @@ const cacheDir = "./test-data/schemas"
 
 var logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
-func TestReadCache(t *testing.T) {
-	store, err := NewSchemaStore(slog.Default(), cacheDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(store.Cache) != 1 {
-		t.Fatalf("Expected 1 schema in cache, got %d", len(store.Cache))
-	}
-}
-
-func TestSchemaKeyFromKindApiVersion(t *testing.T) {
-	tests := map[string]struct {
-		kind       string
-		apiVersion string
-		expected   string
-	}{
-		"kubernetes": {
-			kind:       "Service",
-			apiVersion: "v1",
-			expected:   "service-v1",
-		},
-		"CRD": {
-			kind:       "ApplicationSet",
-			apiVersion: "argoproj.io/v1alpha1",
-			expected:   "applicationset-argoproj.io-v1alpha1",
-		},
-	}
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			key := schemaKeyFromKindApiVersion(test.kind, test.apiVersion)
-			if key != test.expected {
-				t.Fatalf("Expected %s, got %s", test.expected, key)
-			}
-		})
-	}
-}
-
 func TestSchemaFromKindApiVersion(t *testing.T) {
 	tests := map[string]struct {
 		kind       string
@@ -114,10 +77,7 @@ func TestMatchFilePattern(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			match, err := matchFilePattern(test.pattern, test.name)
-			if err != nil {
-				t.Fatalf("Did not expect an error: %s", err)
-			}
+			match := matchFilePattern(test.pattern, test.name)
 			if match != test.match {
 				t.Fatalf("Expected match to be %t, got %t\n", test.match, match)
 			}

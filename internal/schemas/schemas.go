@@ -1,7 +1,6 @@
 package schemas
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,8 +11,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-
-	"github.com/bmatcuk/doublestar/v4"
 )
 
 func NewSchemaStore(logger *slog.Logger, cacheDir string) (SchemaStore, error) {
@@ -37,152 +34,57 @@ func NewSchemaStore(logger *slog.Logger, cacheDir string) (SchemaStore, error) {
 		cache[key] = schema
 	}
 	return SchemaStore{
-		CacheDir: cacheDir,
-		Cache:    cache,
-		Logger:   logger,
+		Logger:              logger,
+		KindApiVersionStore: NewKindApiVersionStore(filepath.Join(cacheDir, "kubernetes")),
+		FileMatchStore:      NewFileMatchStore(filepath.Join(cacheDir, "json")),
 	}, nil
 }
 
 type SchemaStore struct {
-	CacheDir string
-	Cache    map[string][]byte
-	Logger   *slog.Logger
+	Logger              *slog.Logger
+	KindApiVersionStore KindApiVersionStore
+	FileMatchStore      FileMatchStore
 }
 
-type CatalogResponse struct {
-	Schemas []SchemaInfo `json:"schemas"`
+type Schema struct {
+	Schema   []byte
+	URL      string
+	Filename string
 }
 
-type SchemaInfo struct {
-	Name      string   `json:"name"`
-	URL       string   `json:"url"`
-	FileMatch []string `json:"fileMatch"`
-}
-
-func (s *SchemaStore) SchemaFromFilePath(path string) ([]byte, error) {
-	// Call https://www.schemastore.org/api/json/catalog.json to get a
-	// list of schema urls and their matching names. Probably cache this
-	// response.
-	// Download the schema from the given url
-	// HMMMM, how do we cache this? What should be the key for the schema?
-	url, err := s.SchemaURLFromFilePath(path)
+func (s *SchemaStore) SchemaFromFilePath(filename string) ([]byte, error) {
+	schema, err := s.FileMatchStore.GetSchema(filename)
 	if err != nil {
-		return []byte{}, err
-	}
-	s.Logger.Info("Found url", "url", url)
-	schema, err := callTheInternet(url)
-	if err != nil {
-		s.Logger.Error("Failed to download schema", "error", err)
+		s.Logger.Error("Failed to get filematch schema", "error", err, "filename", filename)
 		return []byte{}, err
 	}
 	return schema, nil
 }
 
-func (s *SchemaStore) SchemaURLFromFilePath(filepath string) (string, error) {
-	schema, err := callTheInternet("https://www.schemastore.org/api/json/catalog.json")
+func (s *SchemaStore) SchemaURLFromFilePath(filename string) (string, error) {
+	URL, err := s.FileMatchStore.GetSchemaURL(filename)
 	if err != nil {
-		s.Logger.Error("Failed to download schema info", "error", err)
-		return "", err
-	}
-	var catalog CatalogResponse
-	if err = json.Unmarshal(schema, &catalog); err != nil {
-		s.Logger.Error("Failed to unmarshal catalog response", "error", err, "response", string(schema))
+		s.Logger.Error("Failed to get schema URL", "filename", filename, "error", err)
 		return "", errors.New("Not found")
 	}
-	url := ""
-	for _, schemaInfo := range catalog.Schemas {
-		for _, fileMatch := range schemaInfo.FileMatch {
-			match, err := matchFilePattern(fileMatch, filepath)
-			if err != nil {
-				s.Logger.Error("Bad file pattern to match against", "pattern", fileMatch)
-			}
-			if match {
-				url = schemaInfo.URL
-				break
-			}
-		}
-	}
-	if url == "" {
-		return "", errors.New("Not found")
-	}
-	return url, nil
+	return URL, nil
 }
 
 func (s *SchemaStore) SchemaFromKindApiVersion(kind string, apiVersion string) ([]byte, bool) {
-	key := schemaKeyFromKindApiVersion(kind, apiVersion)
-	schema, found := s.Cache[key]
-	if found {
-		return schema, true
-	}
-	URL := ""
-	var err error
-	if isCRD(apiVersion) {
-		URL, err = buildCRDURL(kind, apiVersion)
-		if err != nil {
-			s.Logger.Error("Could not build CRD URL", "error", err, "kind", kind, "apiVersion", apiVersion)
-			return []byte{}, false
-		}
-	} else {
-		URL = buildKubernetesURL(kind, apiVersion)
-	}
-	schema, err = callTheInternet(URL)
+	schema, err := s.KindApiVersionStore.GetSchema(kind, apiVersion)
 	if err != nil {
-		s.Logger.Error("Could not download schema", "error", err)
+		s.Logger.Error("Could not fetch kind + apiVersion schema", "error", err, "kind", kind, "apiVersion", apiVersion)
 		return []byte{}, false
 	}
-	if err = os.WriteFile(path.Join(s.CacheDir, key+".json"), schema, 0644); err != nil {
-		s.Logger.Error("Could not write schema file", "error", err)
-		return []byte{}, false
-	}
-	s.Cache[key] = schema
 	return schema, true
 }
 
-func schemaKeyFromKindApiVersion(kind string, apiVersion string) string {
-	kind = strings.ToLower(kind)
-	apiVersion = strings.ReplaceAll(apiVersion, "/", "-")
-	return fmt.Sprintf("%s-%s", kind, apiVersion)
+func (s *SchemaStore) SchemaURLFromKindApiVersion(kind string, apiVersion string) string {
+	return s.KindApiVersionStore.GetSchemaURL(kind, apiVersion)
 }
 
 func DocsViewerURL(schemaURL string) string {
 	return "https://json-schema.app/view/" + url.PathEscape("#") + "?url=" + url.QueryEscape(schemaURL)
-}
-
-func (s *SchemaStore) SchemaURLFromKindApiVersion(kind string, apiVersion string) (string, error) {
-	schemaURL := ""
-	var err error
-	if isCRD(apiVersion) {
-		schemaURL, err = buildCRDURL(kind, apiVersion)
-		if err != nil {
-			s.Logger.Error("Could not build CRD URL", "error", err, "kind", kind, "apiVersion", apiVersion)
-			return "", errors.New("Not found")
-		}
-	} else {
-		schemaURL = buildKubernetesURL(kind, apiVersion)
-	}
-	return schemaURL, nil
-}
-
-func isCRD(apiVersion string) bool {
-	return strings.Contains(apiVersion, ".")
-}
-
-func buildKubernetesURL(kind string, apiVersion string) string {
-	apiVersion = strings.ReplaceAll(apiVersion, "/", "-")
-	kind = strings.ToLower(kind)
-	filename := fmt.Sprintf("%s-%s.json", kind, apiVersion)
-	return fmt.Sprintf("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/%s", filename)
-}
-
-func buildCRDURL(kind string, apiVersion string) (string, error) {
-	kind = strings.ToLower(kind)
-	splitApiVersion := strings.Split(apiVersion, "/")
-	if len(splitApiVersion) != 2 {
-		return "", errors.New("CRD apiVersion must contain exactly 1 `/`")
-	}
-	host := splitApiVersion[0]
-	version := splitApiVersion[1]
-	return fmt.Sprintf("https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/%s/%s_%s.json", host, kind, version), nil
 }
 
 func callTheInternet(URL string) ([]byte, error) {
@@ -199,21 +101,4 @@ func callTheInternet(URL string) ([]byte, error) {
 		return []byte{}, err
 	}
 	return body, nil
-}
-
-func matchFilePattern(pattern string, path string) (bool, error) {
-	if filepath.Base(pattern) == pattern {
-		// Match the basename only
-		filename := filepath.Base(path)
-		match, err := filepath.Match(pattern, filename)
-		if err != nil {
-			return false, err
-		}
-		return match, nil
-	}
-	match, err := doublestar.Match(pattern, path)
-	if err != nil {
-		return false, err
-	}
-	return match, nil
 }

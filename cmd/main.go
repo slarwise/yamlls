@@ -303,16 +303,16 @@ func resolveSchema(store schemas.SchemaStore, filename string, text string) ([]b
 func resolveSchemaURL(store schemas.SchemaStore, filename string, text string) (string, bool) {
 	kind, apiVersion := parser.GetKindApiVersion(text)
 	if kind != "" && apiVersion != "" {
-		url, err := store.SchemaURLFromKindApiVersion(kind, apiVersion)
-		if err == nil {
-			return url, true
+		URL := store.SchemaURLFromKindApiVersion(kind, apiVersion)
+		if URL != "" {
+			return URL, true
 		}
 	}
-	url, err := store.SchemaURLFromFilePath(filename)
+	URL, err := store.SchemaURLFromFilePath(filename)
 	if err != nil {
 		return "", false
 	}
-	return url, true
+	return URL, true
 }
 
 func validateAgainstSchema(store schemas.SchemaStore, filename string, text string) []protocol.Diagnostic {
