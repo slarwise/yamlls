@@ -40,6 +40,8 @@
 ## Bugs
 
 - Can't get description of anyOf, such as github workflow jobs.something.runs-on
+- Can't get description of any kustomization fields, I think it can't handle the
+  ref
 
 ## Credits
 
