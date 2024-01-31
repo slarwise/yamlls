@@ -8,36 +8,17 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path"
-	"path/filepath"
-	"strings"
 )
 
 func NewSchemaStore(logger *slog.Logger, cacheDir string) (SchemaStore, error) {
-	dirEntries, err := os.ReadDir(cacheDir)
-	if err != nil {
-		return SchemaStore{}, fmt.Errorf("Failed to read cache dir for schemas: %s", err)
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return SchemaStore{}, err
 	}
-	cache := make(map[string][]byte)
-	for _, f := range dirEntries {
-		if f.IsDir() {
-			continue
-		}
-		key, isJson := strings.CutSuffix(f.Name(), ".json")
-		if !isJson {
-			continue
-		}
-		schema, err := os.ReadFile(path.Join(cacheDir, f.Name()))
-		if err != nil {
-			return SchemaStore{}, fmt.Errorf("Failed to read schema: %s", err)
-		}
-		cache[key] = schema
-	}
-	kindApiVersionStore, err := NewKindApiVersionStore(filepath.Join(cacheDir, "kind-api-version"))
+	kindApiVersionStore, err := NewKindApiVersionStore(cacheDir)
 	if err != nil {
 		return SchemaStore{}, err
 	}
-	fileMatchStore, err := NewFileMatchStore(filepath.Join(cacheDir, "filematch"))
+	fileMatchStore, err := NewFileMatchStore(cacheDir)
 	if err != nil {
 		return SchemaStore{}, err
 	}
@@ -52,12 +33,6 @@ type SchemaStore struct {
 	Logger              *slog.Logger
 	KindApiVersionStore KindApiVersionStore
 	FileMatchStore      FileMatchStore
-}
-
-type Schema struct {
-	Schema   []byte
-	URL      string
-	Filename string
 }
 
 func (s *SchemaStore) SchemaFromFilePath(filename string) ([]byte, error) {

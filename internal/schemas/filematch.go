@@ -7,59 +7,82 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
-
-func NewFileMatchStore(cacheDir string) (FileMatchStore, error) {
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		return FileMatchStore{}, fmt.Errorf("Could not create cache dir: %s", err)
-	}
-	catalog, err := getCatalog()
-	if err != nil {
-		return FileMatchStore{}, fmt.Errorf("Failed to get schema store catalog: %s", err)
-	}
-	cache := map[string]Schema{}
-	cachedSchemas, err := os.ReadDir(cacheDir)
-	if err != nil {
-		return FileMatchStore{}, fmt.Errorf("Could not read cache dir: %s", err)
-	}
-	for _, file := range cachedSchemas {
-		filename := path.Join(cacheDir, file.Name())
-		data, err := os.ReadFile(filename)
-		if err != nil {
-			return FileMatchStore{}, fmt.Errorf("Failed to read schema file from cache: %s", err)
-		}
-		URL := ""
-		for _, info := range catalog {
-			if info.Name == file.Name() {
-				URL = info.URL
-				break
-			}
-		}
-		cache[file.Name()] = Schema{
-			Schema:   data,
-			URL:      URL,
-			Filename: filename,
-		}
-	}
-	return FileMatchStore{
-		CacheDir: cacheDir,
-		cache:    cache,
-		catalog:  catalog,
-	}, nil
-}
-
-type FileMatchStore struct {
-	CacheDir string
-	cache    map[string]Schema
-	catalog  []SchemaInfo
-}
 
 type SchemaInfo struct {
 	Name      string   `json:"name"`
 	URL       string   `json:"url"`
 	FileMatch []string `json:"fileMatch"`
+}
+
+type FileMatchStore struct {
+	CacheDir string
+	schemas  map[string][]byte
+	catalog  []SchemaInfo
+}
+
+func NewFileMatchStore(cacheDir string) (FileMatchStore, error) {
+	catalogFilename := path.Join(cacheDir, "filematch-catalog.json")
+	catalog, err := readCachedCatalog(catalogFilename)
+	if err != nil {
+		catalog, err = getCatalog()
+		if err != nil {
+			return FileMatchStore{}, fmt.Errorf("Failed to get schema store catalog: %s", err)
+		}
+		data, err := json.Marshal(catalog)
+		if err != nil {
+			return FileMatchStore{}, fmt.Errorf("Failed to marshal URLs: %s", err)
+		}
+		if err := os.WriteFile(catalogFilename, data, 0644); err != nil {
+			return FileMatchStore{}, fmt.Errorf("Could not write catalog to filesystem: %s", err)
+		}
+	}
+	schemaDir := path.Join(cacheDir, "filematch")
+	if err := os.MkdirAll(schemaDir, 0755); err != nil {
+		return FileMatchStore{}, fmt.Errorf("Could not create cache dir: %s", err)
+	}
+	schemas, err := readCachedFilematchSchemas(schemaDir)
+	if err != nil {
+		return FileMatchStore{}, fmt.Errorf("Could not read schemas from filesystem: %s", err)
+	}
+	return FileMatchStore{
+		CacheDir: cacheDir,
+		schemas:  schemas,
+		catalog:  catalog,
+	}, nil
+}
+
+func readCachedCatalog(filename string) ([]SchemaInfo, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return []SchemaInfo{}, fmt.Errorf("Could not read catalog from filesystem: %s", err)
+	}
+	var catalog []SchemaInfo
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		return []SchemaInfo{}, fmt.Errorf("Could not unmarshal catalog: %s", err)
+	}
+	return catalog, nil
+}
+
+func readCachedFilematchSchemas(dir string) (map[string][]byte, error) {
+	schemas := make(map[string][]byte)
+	schemaFiles, err := os.ReadDir(dir)
+	if err != nil {
+		return map[string][]byte{}, fmt.Errorf("Could not read cache dir: %s", err)
+	}
+	for _, file := range schemaFiles {
+		filename := path.Join(dir, file.Name())
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			return map[string][]byte{}, fmt.Errorf("Could not read schema file from cache: %s", err)
+		}
+		key := strings.TrimSuffix(file.Name(), ".json")
+		schemas[key] = data
+	}
+	return schemas, nil
 }
 
 func getCatalog() ([]SchemaInfo, error) {
@@ -81,20 +104,16 @@ func (s *FileMatchStore) GetSchema(filename string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	schema, found := s.cache[schemaInfo.Name]
+	schema, found := s.schemas[schemaInfo.Name]
 	if found {
-		return schema.Schema, nil
+		return schema, nil
 	}
 	data, err := callTheInternet(schemaInfo.URL)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to call the internet: %s", err)
 	}
-	cacheFilename := path.Join(s.CacheDir, schemaInfo.Name)
-	s.cache[schemaInfo.Name] = Schema{
-		Schema:   data,
-		URL:      schemaInfo.URL,
-		Filename: cacheFilename,
-	}
+	s.schemas[schemaInfo.Name] = data
+	cacheFilename := path.Join(s.CacheDir, "filematch", schemaInfo.Name+".json")
 	if err := os.WriteFile(cacheFilename, data, 0644); err != nil {
 		return []byte{}, fmt.Errorf("Could not write schema to cache dir: %s", err)
 	}
@@ -123,7 +142,6 @@ func (s *FileMatchStore) GetSchemaInfo(filename string) (SchemaInfo, error) {
 func matchFilePattern(pattern string, filename string) bool {
 	match := false
 	if filepath.Base(pattern) == pattern {
-		// Match the basename only
 		filename := filepath.Base(filename)
 		m, err := filepath.Match(pattern, filename)
 		if err == nil {

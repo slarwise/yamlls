@@ -6,8 +6,6 @@
 - Code Action: Open documentation in browser
 - Diagnostics: Validate yaml syntax
 - Diagnostics: Validate against schema
-- No configuration needed for kubernetes, CRD's and schemas that exist in
-  json.schemastore.org
 
 ## Schema stores
 
@@ -19,13 +17,6 @@
 
 ## Potential TODO's
 
-- [ ] Cache schemas
-  - [ ] Cache kubernetes schemas
-  - [ ] Cache CRD schemas
-  - [ ] Cache schemastore schemas
-- [ ] Cache finding schemas
-  - [ ] Matching kind and apiVersion against a list of schemas
-  - [ ] Matching a filename against a list of schemas
 - [ ] Completion
   - [ ] If `kind` or `apiVersion` is given, give completion suggestions for the
         other

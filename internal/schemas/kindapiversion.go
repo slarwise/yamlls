@@ -3,7 +3,6 @@ package schemas
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path"
 	"regexp"
@@ -11,65 +10,100 @@ import (
 	"strings"
 )
 
+type KindApiVersionStore struct {
+	CacheDir string
+	schemas  kindApiVersionToSchema
+	urls     []string
+}
+
+type kindApiVersionToSchema map[string][]byte
+
 func NewKindApiVersionStore(cacheDir string) (KindApiVersionStore, error) {
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		return KindApiVersionStore{}, fmt.Errorf("Could not create cache dir: %s", err)
-	}
-	URLs, err := kindApiVersionURLs()
+	urlsFilename := path.Join(cacheDir, "kindapiversion-urls.json")
+	URLs, err := readCachedURLs(urlsFilename)
 	if err != nil {
-		return KindApiVersionStore{}, fmt.Errorf("Failed to get schema URLs: %s", err)
-	}
-	cache := map[string]Schema{}
-	cachedSchemas, err := os.ReadDir(cacheDir)
-	if err != nil {
-		return KindApiVersionStore{}, fmt.Errorf("Could not read cache dir: %s", err)
-	}
-	for _, file := range cachedSchemas {
-		filename := path.Join(cacheDir, file.Name())
-		data, err := os.ReadFile(filename)
+		URLs, err = kindApiVersionURLs()
 		if err != nil {
-			return KindApiVersionStore{}, fmt.Errorf("Failed to read schema file from cache: %s", err)
+			return KindApiVersionStore{}, fmt.Errorf("Failed to get URLs: %s", err)
 		}
-		cache[file.Name()] = Schema{
-			Schema:   data,
-			URL:      "", // TODO: Can we get the URL here?
-			Filename: filename,
+		data, err := json.Marshal(URLs)
+		if err != nil {
+			return KindApiVersionStore{}, fmt.Errorf("Failed to marshal URLs: %s", err)
 		}
+		if err := os.WriteFile(urlsFilename, data, 0644); err != nil {
+			return KindApiVersionStore{}, fmt.Errorf("Failed to write URLs to filesystem: %s", err)
+		}
+	}
+	schemaDir := path.Join(cacheDir, "kindapiversion")
+	if err := os.MkdirAll(schemaDir, 0755); err != nil {
+		return KindApiVersionStore{}, fmt.Errorf("Failed to create schema directory: %s", err)
+	}
+	schemas, err := readCachedKindApiVersionSchemas(schemaDir)
+	if err != nil {
+		return KindApiVersionStore{}, fmt.Errorf("Failed to read schemas from filesystem: %s", err)
 	}
 	return KindApiVersionStore{
-		CacheDir:   cacheDir,
-		cache:      cache,
-		schemaURLs: URLs,
+		CacheDir: cacheDir,
+		schemas:  schemas,
+		urls:     URLs,
 	}, nil
 }
 
-type KindApiVersionStore struct {
-	CacheDir   string
-	cache      map[string]Schema
-	schemaURLs []string
+func readCachedURLs(filename string) ([]string, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return []string{}, err
+	}
+	var URLs []string
+	if err := json.Unmarshal(data, &URLs); err != nil {
+		return []string{}, err
+	}
+	return URLs, nil
+}
+
+func readCachedKindApiVersionSchemas(dir string) (kindApiVersionToSchema, error) {
+	schemas := kindApiVersionToSchema{}
+	schemaFiles, err := os.ReadDir(dir)
+	if err != nil {
+		return kindApiVersionToSchema{}, fmt.Errorf("Could not read cache dir: %s", err)
+	}
+	for _, file := range schemaFiles {
+		filename := path.Join(dir, file.Name())
+		data, err := os.ReadFile(filename)
+		if err != nil {
+			return kindApiVersionToSchema{}, fmt.Errorf("Failed to read schema file from cache: %s", err)
+		}
+		basenameNoExt := strings.TrimSuffix(file.Name(), ".json")
+		split := strings.Split(basenameNoExt, "-")
+		if len(split) != 2 {
+			return kindApiVersionToSchema{}, fmt.Errorf("Failed to parse schema filename into kind and apiVersion: %s", file.Name())
+		}
+		kind := split[0]
+		apiVersion := split[1]
+		apiVersion = strings.ReplaceAll(apiVersion, "!", "/")
+		key := fmt.Sprintf("%s-%s", kind, apiVersion)
+		schemas[key] = data
+	}
+	return schemas, nil
 }
 
 func (s *KindApiVersionStore) GetSchema(kind string, apiVersion string) ([]byte, error) {
-	key := kindApiVersionKey(kind, apiVersion)
-	schema, found := s.cache[key]
+	key := fmt.Sprintf("%s-%s", kind, apiVersion)
+	schema, found := s.schemas[key]
 	if found {
-		return schema.Schema, nil
+		return schema, nil
 	}
 	URL := buildKindApiVersionURL(kind, apiVersion)
-	if !slices.Contains(s.schemaURLs, URL) {
-		return []byte{}, fmt.Errorf("Schema URL not valid: %s", URL)
+	if !slices.Contains(s.urls, URL) {
+		return nil, fmt.Errorf("The URL is not valid: %s", URL)
 	}
 	data, err := callTheInternet(URL)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Failed to download schema: %s", err)
 	}
-	filename := path.Join(s.CacheDir, key+".json")
-	s.cache[key] = Schema{
-		Schema:   data,
-		URL:      URL,
-		Filename: filename,
-	}
-	log.Printf("filename %s", filename)
+	s.schemas[key] = data
+	basename := fmt.Sprintf("%s-%s.json", kind, strings.ReplaceAll(apiVersion, "/", "!"))
+	filename := path.Join(s.CacheDir, "kindapiversion", basename)
 	if err := os.WriteFile(filename, data, 0644); err != nil {
 		return []byte{}, fmt.Errorf("Could not write schema to cache dir: %s", err)
 	}
@@ -145,20 +179,10 @@ func getCRDURLs() ([]string, error) {
 
 func (s *KindApiVersionStore) GetSchemaURL(kind string, apiVersion string) (string, error) {
 	URL := buildKindApiVersionURL(kind, apiVersion)
-	if !slices.Contains(s.schemaURLs, URL) {
+	if !slices.Contains(s.urls, URL) {
 		return "", fmt.Errorf("Schema URL not valid: %s", URL)
 	}
-	key := kindApiVersionKey(kind, apiVersion)
-	cachedSchema, found := s.cache[key]
-	if found && cachedSchema.URL == "" {
-		cachedSchema.URL = URL
-		s.cache[key] = cachedSchema
-	}
 	return URL, nil
-}
-
-func kindApiVersionKey(kind string, apiVersion string) string {
-	return fmt.Sprintf("%s-%s", strings.ToLower(kind), strings.ReplaceAll(apiVersion, "/", "-"))
 }
 
 func buildKindApiVersionURL(kind string, apiVersion string) string {
