@@ -10,6 +10,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/slarwise/yamlls/internal/kustomization"
 	"github.com/slarwise/yamlls/internal/lsp"
 	"github.com/slarwise/yamlls/internal/parser"
 	"github.com/slarwise/yamlls/internal/schemas"
@@ -108,6 +109,9 @@ func main() {
 			diagnostics = append(diagnostics, validYamlDiagnostics...)
 			if len(validYamlDiagnostics) == 0 {
 				diagnostics = append(diagnostics, validateAgainstSchema(schemaStore, doc.URI.Filename(), doc.Text)...)
+			}
+			if path.Base(doc.URI.Filename()) == "kustomization.yaml" {
+				diagnostics = append(diagnostics, kustomizationForgottenResources(doc.URI.Filename(), doc.Text)...)
 			}
 			m.Notify(protocol.MethodTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 				URI:         doc.URI,
@@ -382,4 +386,32 @@ func isValidYaml(text string) []protocol.Diagnostic {
 		ds = append(ds, d)
 	}
 	return ds
+}
+
+func kustomizationForgottenResources(filename string, text string) []protocol.Diagnostic {
+	forgottenFiles, err := kustomization.FilesNotIncluded(path.Dir(filename), text)
+	forgottenFilesString := strings.Join(forgottenFiles, ", ")
+	if err != nil {
+		return []protocol.Diagnostic{}
+	}
+	if len(forgottenFiles) == 0 {
+		return []protocol.Diagnostic{}
+	}
+	line := kustomization.GetResourcesLine(text)
+	d := protocol.Diagnostic{
+		Range: protocol.Range{
+			Start: protocol.Position{
+				Line:      uint32(line),
+				Character: 0,
+			},
+			End: protocol.Position{
+				Line:      uint32(line),
+				Character: uint32(len("resources:")),
+			},
+		},
+		Severity: protocol.DiagnosticSeverityHint,
+		Source:   "yamlls",
+		Message:  fmt.Sprintf("Resources not included: %s", forgottenFilesString),
+	}
+	return []protocol.Diagnostic{d}
 }

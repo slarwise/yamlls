@@ -2,10 +2,12 @@
 
 ## Features
 
-- Hover
+- Hover: Show description of field
 - Code Action: Open documentation in browser
 - Diagnostics: Validate yaml syntax
 - Diagnostics: Validate against schema
+- Diagnostics - Kustomization: Warn when not all yaml files in the current dir
+  are included as resources
 
 ## Schema stores
 
@@ -29,11 +31,6 @@
 - [ ] Background http server
   - [ ] Show external documentation in a nice way for the currently open file.
         Can do this since we get notifications when the user changes file.
-- [ ] Diagnostics
-  - [ ] Info diagnostic for Kustomization files when not all files in the
-        current dir are included
-- [ ] Notifications
-  - [ ] Notify when a schema is detected/changed for the current file
 - [ ] Workspace: If there is an kustomization file, connect the resources
       somehow? And give info if there are things that don't match
 
