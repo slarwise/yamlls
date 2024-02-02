@@ -5,7 +5,7 @@
 You can replace `~/go/bin` with a folder that is in your PATH.
 
 ```
-git clone github.com/slarwise/yamlls
+git clone https://github.com/slarwise/yamlls
 cd yamlls
 go build -o ~/go/bin/yamlls ./cmd/main.go
 ```
@@ -29,6 +29,7 @@ go build -o ~/go/bin/yamlls ./cmd/main.go
 
 ## Potential TODO's
 
+- [ ] Show the position for syntax and schema errors
 - [ ] Completion
   - [ ] If `kind` or `apiVersion` is given, give completion suggestions for the
         other
