@@ -1,5 +1,15 @@
 # Yaml language server
 
+## Installation
+
+You can replace `~/go/bin` with a folder that is in your PATH.
+
+```
+git clone github.com/slarwise/yamlls
+cd yamlls
+go build -o ~/go/bin/yamlls ./cmd/main.go
+```
+
 ## Features
 
 - Hover: Show description of field
