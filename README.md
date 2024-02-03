@@ -25,6 +25,8 @@ go install github.com/slarwise/yamlls@latest
 
 ## Potential TODO's
 
+- [ ] Use a better documentation previewer, `json-schema.app` has not been
+      working since Feb 1
 - [ ] Show the position for syntax and schema errors
 - [ ] Completion
   - [ ] If `kind` or `apiVersion` is given, give completion suggestions for the
