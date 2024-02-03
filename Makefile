@@ -1,6 +1,6 @@
 .PHONY: install
 install:
-	go build -o ~/go/bin/yamlls ./cmd/main.go
+	go install .
 
 .PHONY: test
 test:
