@@ -28,6 +28,9 @@ func NewCRDStore() (CRDStore, error) {
 		return CRDStore{}, fmt.Errorf("Failed to download file tree: %s", err)
 	}
 	index, err := parseFileTreeResponse(fileTreeResponse)
+	if err != nil {
+		return CRDStore{}, fmt.Errorf("Failed to get schema index: %s", err)
+	}
 	return CRDStore{Index: index}, nil
 }
 
