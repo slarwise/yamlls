@@ -49,7 +49,7 @@ func main() {
 		logger.Error("Failed to create `yamlls/schemas` dir in cache directory", "cache_dir", cacheDir, "error", err)
 		os.Exit(1)
 	}
-	schemaStore, err := schemas.NewSchemaStore(logger, schemasDir)
+	schemaStore, err := schemas.NewSchemaStore()
 	if err != nil {
 		logger.Error("Failed to create schema store", "error", err)
 		os.Exit(1)
@@ -108,7 +108,17 @@ func main() {
 			validYamlDiagnostics := isValidYaml(doc.Text)
 			diagnostics = append(diagnostics, validYamlDiagnostics...)
 			if len(validYamlDiagnostics) == 0 {
-				diagnostics = append(diagnostics, validateAgainstSchema(schemaStore, doc.URI.Filename(), doc.Text)...)
+				schema, err := schemaStore.GetSchema(doc.URI.Filename(), doc.Text)
+				if err != nil {
+					logger.Error("Could not find schema", "filename", doc.URI.Filename(), "error", err)
+				} else {
+					validateDiagnostics, err := validateAgainstSchema(schema, doc.Text)
+					if err != nil {
+						logger.Error("Could not validate against schema: %s", err)
+					} else {
+						diagnostics = append(diagnostics, validateDiagnostics...)
+					}
+				}
 			}
 			if path.Base(doc.URI.Filename()) == "kustomization.yaml" {
 				diagnostics = append(diagnostics, kustomizationForgottenResources(doc.URI.Filename(), doc.Text)...)
@@ -154,9 +164,9 @@ func main() {
 			return nil, err
 		}
 		text := filenameToContents[params.TextDocument.URI.Filename()]
-		schema, found := resolveSchema(schemaStore, params.TextDocument.URI.Filename(), text)
-		if !found {
-			logger.Error("Could not find schema", "filename", params.TextDocument.URI.Filename())
+		schema, err := schemaStore.GetSchema(params.TextDocument.URI.Filename(), text)
+		if err != nil {
+			logger.Error("Could not find schema", "filename", params.TextDocument.URI.Filename(), "error", err)
 			return nil, errors.New("Not found")
 		}
 		yamlPath, err := parser.GetPathAtPosition(params.Position.Line, params.Position.Character, text)
@@ -184,9 +194,9 @@ func main() {
 			return nil, err
 		}
 		text := filenameToContents[params.TextDocument.URI.Filename()]
-		schema, found := resolveSchema(schemaStore, params.TextDocument.URI.Filename(), text)
-		if !found {
-			logger.Error("Could not find schema", "filename", params.TextDocument.URI.Filename())
+		schema, err := schemaStore.GetSchema(params.TextDocument.URI.Filename(), text)
+		if err != nil {
+			logger.Error("Could not find schema", "filename", params.TextDocument.URI.Filename(), "error", err)
 			return nil, errors.New("Not found")
 		}
 		// TODO: This fails when there is a syntax error, which it will be
@@ -224,9 +234,9 @@ func main() {
 			return nil, err
 		}
 		text := filenameToContents[params.TextDocument.URI.Filename()]
-		schemaURL, found := resolveSchemaURL(schemaStore, params.TextDocument.URI.Filename(), text)
-		if !found {
-			logger.Error("Could not find schema", "filename", params.TextDocument.URI.Filename())
+		schemaURL, err := schemaStore.GetSchemaURL(params.TextDocument.URI.Filename(), text)
+		if err != nil {
+			logger.Error("Could not find schema URL", "filename", params.TextDocument.URI.Filename(), "error", err)
 			return nil, errors.New("Not found")
 		}
 		viewerURL := schemas.DocsViewerURL(schemaURL)
@@ -289,60 +299,22 @@ func main() {
 	os.Exit(1)
 }
 
-func resolveSchema(store schemas.SchemaStore, filename string, text string) ([]byte, bool) {
-	kind, apiVersion := parser.GetKindApiVersion(text)
-	if kind != "" && apiVersion != "" {
-		schema, found := store.SchemaFromKindApiVersion(kind, apiVersion)
-		if found {
-			return schema, true
-		}
-	}
-	schema, err := store.SchemaFromFilePath(filename)
-	if err != nil {
-		return []byte{}, false
-	}
-	return schema, true
-}
-
-func resolveSchemaURL(store schemas.SchemaStore, filename string, text string) (string, bool) {
-	kind, apiVersion := parser.GetKindApiVersion(text)
-	if kind != "" && apiVersion != "" {
-		URL, err := store.SchemaURLFromKindApiVersion(kind, apiVersion)
-		if err == nil {
-			return URL, true
-		}
-	}
-	URL, err := store.SchemaURLFromFilePath(filename)
-	if err != nil {
-		return "", false
-	}
-	return URL, true
-}
-
-func validateAgainstSchema(store schemas.SchemaStore, filename string, text string) []protocol.Diagnostic {
+func validateAgainstSchema(schema []byte, text string) ([]protocol.Diagnostic, error) {
 	diagnostics := []protocol.Diagnostic{}
-	schema, found := resolveSchema(store, filename, text)
-	if !found {
-		store.Logger.Error("Could not resolve schema")
-		return diagnostics
-	}
 	jsonText, err := yaml.YAMLToJSON([]byte(text))
 	if err != nil {
-		store.Logger.Error("Failed to convert yaml to json")
-		return diagnostics
+		return diagnostics, fmt.Errorf("Failed to convert yaml to json: %s", err)
 	}
 	schemaLoader := gojsonschema.NewBytesLoader(schema)
 	documentLoader := gojsonschema.NewBytesLoader(jsonText)
 	result, err := gojsonschema.Validate(schemaLoader, documentLoader)
 	if err != nil {
-		store.Logger.Error("Failed to validate against schema", "error", err)
-		return diagnostics
+		return diagnostics, fmt.Errorf("Failed to validate against schema: %s", err)
 	}
 	if result.Valid() {
-		return diagnostics
+		return diagnostics, nil
 	}
 	for _, e := range result.Errors() {
-		store.Logger.Info("context", "context", e.Context(), "details", e.Details(), "field", e.Field(), "type", e.Type())
 		d := protocol.Diagnostic{
 			Range: protocol.Range{
 				Start: protocol.Position{
@@ -360,7 +332,7 @@ func validateAgainstSchema(store schemas.SchemaStore, filename string, text stri
 		}
 		diagnostics = append(diagnostics, d)
 	}
-	return diagnostics
+	return diagnostics, nil
 }
 
 func isValidYaml(text string) []protocol.Diagnostic {
