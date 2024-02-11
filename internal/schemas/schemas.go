@@ -1,91 +1,72 @@
 package schemas
 
 import (
-	"errors"
 	"fmt"
-	"io"
-	"log/slog"
-	"net/http"
 	"net/url"
-	"os"
+
+	. "github.com/slarwise/yamlls/internal/errors"
+	"github.com/slarwise/yamlls/internal/jsonschemastore"
+	"github.com/slarwise/yamlls/internal/kubernetesstore"
+	"github.com/slarwise/yamlls/internal/parser"
 )
 
-func NewSchemaStore(logger *slog.Logger, cacheDir string) (SchemaStore, error) {
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
-		return SchemaStore{}, err
-	}
-	kindApiVersionStore, err := NewKindApiVersionStore(cacheDir)
+type SchemaStore struct {
+	kubernetesStore kubernetesstore.KubernetesStore
+	jsonSchemaStore jsonschemastore.JsonSchemaStore
+}
+
+func NewSchemaStore() (SchemaStore, error) {
+	kubernetesStore, err := kubernetesstore.NewKubernetesStore()
 	if err != nil {
-		return SchemaStore{}, err
+		return SchemaStore{}, fmt.Errorf("Could not create kubernetes schema store: %s", err)
 	}
-	fileMatchStore, err := NewFileMatchStore(cacheDir)
+	jsonSchemaStore, err := jsonschemastore.NewJsonSchemaStore()
 	if err != nil {
-		return SchemaStore{}, err
+		return SchemaStore{}, fmt.Errorf("Could not create json schema store: %s", err)
 	}
 	return SchemaStore{
-		Logger:              logger,
-		KindApiVersionStore: kindApiVersionStore,
-		FileMatchStore:      fileMatchStore,
+		kubernetesStore: kubernetesStore,
+		jsonSchemaStore: jsonSchemaStore,
 	}, nil
 }
 
-type SchemaStore struct {
-	Logger              *slog.Logger
-	KindApiVersionStore KindApiVersionStore
-	FileMatchStore      FileMatchStore
+func (s *SchemaStore) GetSchema(filename string, text string) ([]byte, error) {
+	group, version, kind := parser.GetGroupVersionKind(text)
+	if group != "" && version != "" && kind != "" {
+		schema, err := s.kubernetesStore.GetSchema(group, version, kind)
+		if err == nil {
+			return schema, nil
+		}
+		if err != ErrorSchemaNotFound {
+			return []byte{}, fmt.Errorf("Error when fetching schema: %s", err)
+		}
+	}
+	schema, err := s.jsonSchemaStore.GetSchema(filename)
+	switch err {
+	case nil:
+		return schema, nil
+	case ErrorSchemaNotFound:
+		return []byte{}, ErrorSchemaNotFound
+	default:
+		return []byte{}, fmt.Errorf("Error when fetching schema: %s", err)
+	}
 }
 
-func (s *SchemaStore) SchemaFromFilePath(filename string) ([]byte, error) {
-	schema, err := s.FileMatchStore.GetSchema(filename)
-	if err != nil {
-		s.Logger.Error("Failed to get filematch schema", "error", err, "filename", filename)
-		return []byte{}, err
+func (s *SchemaStore) GetSchemaURL(filename string, text string) (string, error) {
+	group, version, kind := parser.GetGroupVersionKind(text)
+	if group != "" && version != "" && kind != "" {
+		URL, err := s.kubernetesStore.GetSchemaURL(group, version, kind)
+		if err == nil {
+			return URL, nil
+		}
 	}
-	return schema, nil
-}
-
-func (s *SchemaStore) SchemaURLFromFilePath(filename string) (string, error) {
-	URL, err := s.FileMatchStore.GetSchemaURL(filename)
-	if err != nil {
-		s.Logger.Error("Failed to get schema URL", "filename", filename, "error", err)
-		return "", errors.New("Not found")
+	URL, err := s.jsonSchemaStore.GetSchemaURL(filename)
+	if err == nil {
+		return URL, nil
 	}
-	return URL, nil
-}
-
-func (s *SchemaStore) SchemaFromKindApiVersion(kind string, apiVersion string) ([]byte, bool) {
-	schema, err := s.KindApiVersionStore.GetSchema(kind, apiVersion)
-	if err != nil {
-		s.Logger.Error("Could not fetch kind + apiVersion schema", "error", err, "kind", kind, "apiVersion", apiVersion)
-		return []byte{}, false
-	}
-	return schema, true
-}
-
-func (s *SchemaStore) SchemaURLFromKindApiVersion(kind string, apiVersion string) (string, error) {
-	URL, err := s.KindApiVersionStore.GetSchemaURL(kind, apiVersion)
-	if err != nil {
-		return "", errors.New("Schema not found")
-	}
-	return URL, nil
+	return "", ErrorSchemaNotFound
 }
 
 func DocsViewerURL(schemaURL string) string {
 	return "https://json-schema.app/view/" + url.PathEscape("#") + "?url=" + url.QueryEscape(schemaURL)
-}
-
-func callTheInternet(URL string) ([]byte, error) {
-	resp, err := http.Get(URL)
-	if err != nil {
-		return []byte{}, err
-	}
-	if resp.StatusCode != 200 {
-		return []byte{}, fmt.Errorf("Got non-200 status code: %s", resp.Status)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return []byte{}, err
-	}
-	return body, nil
 }

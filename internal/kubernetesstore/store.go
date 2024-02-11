@@ -2,11 +2,12 @@ package kubernetesstore
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+
+	. "github.com/slarwise/yamlls/internal/errors"
 )
 
 type KubernetesStore struct {
@@ -69,11 +70,9 @@ func parseIndexResponse(data []byte) ([]GroupVersionKind, error) {
 	return groupVersionKinds, nil
 }
 
-var ErrorUnknownGroupVersionKind = errors.New("Unknown group version kind")
-
 func (s *KubernetesStore) GetSchema(group, version, kind string) ([]byte, error) {
 	if !isKnownGroupVersionKind(s.Index, group, version, kind) {
-		return []byte{}, ErrorUnknownGroupVersionKind
+		return []byte{}, ErrorSchemaNotFound
 	}
 	URL := buildSchemaURL(group, version, kind)
 	data, err := callTheInternet(URL)
@@ -85,7 +84,7 @@ func (s *KubernetesStore) GetSchema(group, version, kind string) ([]byte, error)
 
 func (s *KubernetesStore) GetSchemaURL(group, version, kind string) (string, error) {
 	if !isKnownGroupVersionKind(s.Index, group, version, kind) {
-		return "", ErrorUnknownGroupVersionKind
+		return "", ErrorSchemaNotFound
 	}
 	return buildSchemaURL(group, version, kind), nil
 }

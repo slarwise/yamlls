@@ -4,51 +4,61 @@ import (
 	"testing"
 )
 
-func TestGetKindApiVersion(t *testing.T) {
+func TestGetGroupKindVersion(t *testing.T) {
 	tests := map[string]struct {
-		kind       string
-		apiVersion string
-		text       string
+		group   string
+		version string
+		kind    string
+		text    string
 	}{
 		"kubernetes": {
-			kind:       "Service",
-			apiVersion: "v1",
-			text:       "kind: Service\napiVersion: v1",
+			group:   "",
+			version: "v1",
+			kind:    "Service",
+			text:    "kind: Service\napiVersion: v1",
 		},
 		"CRD": {
-			kind:       "Kustomization",
-			apiVersion: "kustomize.config.k8s.io/v1beta1",
-			text:       "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization",
+			group:   "kustomize.config.k8s.io",
+			version: "v1beta1",
+			kind:    "Kustomization",
+			text:    "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization",
 		},
 		"no kind": {
-			kind:       "",
-			apiVersion: "kustomize.config.k8s.io/v1beta1",
-			text:       "apiVersion: kustomize.config.k8s.io/v1beta1",
+			group:   "kustomize.config.k8s.io",
+			version: "v1beta1",
+			kind:    "",
+			text:    "apiVersion: kustomize.config.k8s.io/v1beta1",
 		},
 		"no apiVersion": {
-			kind:       "Kustomization",
-			apiVersion: "",
-			text:       "kind: Kustomization",
+			group:   "",
+			version: "",
+			kind:    "Kustomization",
+			text:    "kind: Kustomization",
 		},
 		"empty": {
-			kind:       "",
-			apiVersion: "",
-			text:       "",
+			group:   "",
+			version: "",
+			kind:    "",
+			text:    "",
 		},
 		"not yaml": {
-			kind:       "",
-			apiVersion: "",
-			text:       "Hello\nWorld",
+			group:   "",
+			version: "",
+			kind:    "",
+			text:    "Hello\nWorld",
 		},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			kind, apiVersion := GetKindApiVersion(test.text)
+			group, version, kind := GetGroupVersionKind(test.text)
+			if group != test.group {
+				t.Fatalf("Expected `%s`, got `%s`", test.group, group)
+			}
+			if version != test.version {
+				t.Fatalf("Expected `%s`, got `%s`", test.version, version)
+			}
 			if kind != test.kind {
 				t.Fatalf("Expected `%s`, got `%s`", test.kind, kind)
-			}
-			if apiVersion != test.apiVersion {
-				t.Fatalf("Expected `%s`, got `%s`", test.apiVersion, apiVersion)
 			}
 		})
 	}

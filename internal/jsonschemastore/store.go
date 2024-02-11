@@ -2,11 +2,12 @@ package jsonschemastore
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
+
+	. "github.com/slarwise/yamlls/internal/errors"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
@@ -45,12 +46,10 @@ func parseIndexResponse(data []byte) ([]SchemaInfo, error) {
 	return indexResponse.Schemas, nil
 }
 
-var ErrorNoMatchingSchema = errors.New("No matching schema found")
-
 func (s *JsonSchemaStore) GetSchema(filename string) ([]byte, error) {
 	schemaInfo, found := getMatchingSchemaInfo(s.Index, filename)
 	if !found {
-		return nil, ErrorNoMatchingSchema
+		return nil, ErrorSchemaNotFound
 	}
 	data, err := callTheInternet(schemaInfo.URL)
 	if err != nil {
@@ -62,7 +61,7 @@ func (s *JsonSchemaStore) GetSchema(filename string) ([]byte, error) {
 func (s *JsonSchemaStore) GetSchemaURL(filename string) (string, error) {
 	schemaInfo, found := getMatchingSchemaInfo(s.Index, filename)
 	if !found {
-		return "", ErrorNoMatchingSchema
+		return "", ErrorSchemaNotFound
 	}
 	return schemaInfo.URL, nil
 }

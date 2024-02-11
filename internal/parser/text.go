@@ -5,24 +5,28 @@ import (
 	"strings"
 )
 
+var groupAndVersionPattern = regexp.MustCompile(`^apiVersion:\s+([^/]*/){0,1}(.+)$`)
 var kindPattern = regexp.MustCompile(`^kind:\s+(.+)$`)
-var apiVersionPattern = regexp.MustCompile(`^apiVersion:\s+(.+)$`)
 
-func GetKindApiVersion(text string) (string, string) {
+func GetGroupVersionKind(text string) (string, string, string) {
 	lines := strings.Split(text, "\n")
+	group := ""
+	version := ""
 	kind := ""
-	apiVersion := ""
 	for _, l := range lines {
+		groupAndVersionMatch := groupAndVersionPattern.FindStringSubmatch(l)
+		if len(groupAndVersionMatch) == 3 {
+			group = groupAndVersionMatch[1]
+			group = strings.TrimSuffix(group, "/")
+			version = groupAndVersionMatch[2]
+		}
 		kindMatch := kindPattern.FindStringSubmatch(l)
 		if len(kindMatch) == 2 {
 			kind = kindMatch[1]
 		}
-		apiVersionMatch := apiVersionPattern.FindStringSubmatch(l)
-		if len(apiVersionMatch) == 2 {
-			apiVersion = apiVersionMatch[1]
-		}
 	}
+	group = strings.Trim(group, `"`)
+	version = strings.Trim(version, `"`)
 	kind = strings.Trim(kind, `"`)
-	apiVersion = strings.Trim(apiVersion, `"`)
-	return kind, apiVersion
+	return group, version, kind
 }
