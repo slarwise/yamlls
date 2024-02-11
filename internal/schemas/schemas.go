@@ -32,7 +32,7 @@ func NewSchemaStore() (SchemaStore, error) {
 
 func (s *SchemaStore) GetSchema(filename string, text string) ([]byte, error) {
 	group, version, kind := parser.GetGroupVersionKind(text)
-	if group != "" && version != "" && kind != "" {
+	if version != "" && kind != "" {
 		schema, err := s.kubernetesStore.GetSchema(group, version, kind)
 		if err == nil {
 			return schema, nil
