@@ -106,7 +106,6 @@ func main() {
 	go func() {
 		for doc := range documentUpdates {
 			filenameToContents[doc.URI.Filename()] = doc.Text
-			logger.Info("In channel goroutine", "fileURIToContents", filenameToContents)
 			diagnostics := []protocol.Diagnostic{}
 			validYamlDiagnostics := isValidYaml(doc.Text)
 			diagnostics = append(diagnostics, validYamlDiagnostics...)
