@@ -1,11 +1,5 @@
 # Yaml language server
 
-## Installation
-
-```
-go install github.com/slarwise/yamlls@latest
-```
-
 ## Features
 
 - Hover: Show description of field
@@ -22,6 +16,49 @@ go install github.com/slarwise/yamlls@latest
 - [Custom Resource Definitions](github.com/datreeio/CRDs-catalog). Detected from
   `kind` and `apiVersion`.
 - [Others](json.schemastore.org). Detected from filename.
+
+## Installation
+
+```
+go install github.com/slarwise/yamlls@latest
+```
+
+This will install `yamlls` into `$GOPATH/bin` or `~/go/bin`. Make sure that dir
+is in your `$PATH`.
+
+### VS Code
+
+TODO. Do you have to write an extension? Can't you just point to a binary?
+
+### Helix
+
+In your `languages.toml`, add
+
+```toml
+[[language]]
+name = "yaml"
+language-servers = ["yamlls"]
+
+[language-server.yamlls]
+command = "yamlls"
+```
+
+### NeoVim
+
+In your `init.lua`, or something sourced from there, add
+
+```lua
+vim.api.nvim_create_autocmd('Filetype', {
+    pattern = "yaml",
+    callback = function()
+        vim.lsp.start({
+            name = "yamlls",
+            cmd = { "yamlls" },
+            root_dir = vim.fs.dirname(vim.fs.find(".git", { upward = true, path = vim.api.nvim_buf_get_name(0) })[1]),
+        })
+    end
+})
+```
 
 ## Potential TODO's
 
