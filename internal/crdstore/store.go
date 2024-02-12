@@ -3,16 +3,16 @@ package crdstore
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"regexp"
 	"strings"
 
+	"github.com/slarwise/yamlls/internal/cachedhttp"
 	. "github.com/slarwise/yamlls/internal/errors"
 )
 
 type CRDStore struct {
-	Index []GroupVersionKind
+	Index      []GroupVersionKind
+	httpclient cachedhttp.CachedHttpClient
 }
 
 type GroupVersionKind struct {
@@ -21,9 +21,9 @@ type GroupVersionKind struct {
 	Kind    string
 }
 
-func NewCRDStore() (CRDStore, error) {
+func NewCRDStore(httpclient cachedhttp.CachedHttpClient) (CRDStore, error) {
 	url := "https://api.github.com/repos/datreeio/CRDs-catalog/git/trees/main?recursive=true"
-	fileTreeResponse, err := callTheInternet(url)
+	fileTreeResponse, err := httpclient.GetBody(url)
 	if err != nil {
 		return CRDStore{}, fmt.Errorf("Failed to download file tree: %s", err)
 	}
@@ -31,7 +31,10 @@ func NewCRDStore() (CRDStore, error) {
 	if err != nil {
 		return CRDStore{}, fmt.Errorf("Failed to get schema index: %s", err)
 	}
-	return CRDStore{Index: index}, nil
+	return CRDStore{
+		Index:      index,
+		httpclient: httpclient,
+	}, nil
 }
 
 func parseFileTreeResponse(response []byte) ([]GroupVersionKind, error) {
@@ -79,7 +82,7 @@ func (s *CRDStore) GetSchema(group, version, kind string) ([]byte, error) {
 		return []byte{}, ErrorSchemaNotFound
 	}
 	URL := buildSchemaURL(group, version, kind)
-	data, err := callTheInternet(URL)
+	data, err := s.httpclient.GetBody(URL)
 	if err != nil {
 		return []byte{}, fmt.Errorf("Failed to download schema: %s", err)
 	}
@@ -105,20 +108,4 @@ func isKnownGroupVersionKind(index []GroupVersionKind, group, version, kind stri
 
 func buildSchemaURL(group, version, kind string) string {
 	return fmt.Sprintf("https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/%s/%s_%s.json", group, kind, version)
-}
-
-func callTheInternet(URL string) ([]byte, error) {
-	resp, err := http.Get(URL)
-	if err != nil {
-		return []byte{}, err
-	}
-	if resp.StatusCode != 200 {
-		return []byte{}, fmt.Errorf("Got non-200 status code: %s", resp.Status)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return []byte{}, err
-	}
-	return body, nil
 }

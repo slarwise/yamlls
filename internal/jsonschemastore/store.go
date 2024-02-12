@@ -3,10 +3,9 @@ package jsonschemastore
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"path/filepath"
 
+	"github.com/slarwise/yamlls/internal/cachedhttp"
 	. "github.com/slarwise/yamlls/internal/errors"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -19,11 +18,12 @@ type SchemaInfo struct {
 }
 
 type JsonSchemaStore struct {
-	Index []SchemaInfo
+	Index      []SchemaInfo
+	httpclient cachedhttp.CachedHttpClient
 }
 
-func NewJsonSchemaStore() (JsonSchemaStore, error) {
-	indexResponse, err := callTheInternet("https://www.schemastore.org/api/json/catalog.json")
+func NewJsonSchemaStore(httpclient cachedhttp.CachedHttpClient) (JsonSchemaStore, error) {
+	indexResponse, err := httpclient.GetBody("https://www.schemastore.org/api/json/catalog.json")
 	if err != nil {
 		return JsonSchemaStore{}, fmt.Errorf("Failed to download index: %s", err)
 	}
@@ -32,7 +32,8 @@ func NewJsonSchemaStore() (JsonSchemaStore, error) {
 		return JsonSchemaStore{}, fmt.Errorf("Failed to parse index: %s", err)
 	}
 	return JsonSchemaStore{
-		Index: index,
+		Index:      index,
+		httpclient: httpclient,
 	}, nil
 }
 
@@ -51,7 +52,7 @@ func (s *JsonSchemaStore) GetSchema(filename string) ([]byte, error) {
 	if !found {
 		return nil, ErrorSchemaNotFound
 	}
-	data, err := callTheInternet(schemaInfo.URL)
+	data, err := s.httpclient.GetBody(schemaInfo.URL)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to call the internet: %s", err)
 	}
@@ -93,20 +94,4 @@ func matchFilePattern(pattern string, filename string) bool {
 		}
 	}
 	return match
-}
-
-func callTheInternet(URL string) ([]byte, error) {
-	resp, err := http.Get(URL)
-	if err != nil {
-		return []byte{}, err
-	}
-	if resp.StatusCode != 200 {
-		return []byte{}, fmt.Errorf("Got non-200 status code: %s", resp.Status)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return []byte{}, err
-	}
-	return body, nil
 }

@@ -49,7 +49,7 @@ func main() {
 		logger.Error("Failed to create `yamlls/schemas` dir in cache directory", "cache_dir", cacheDir, "error", err)
 		os.Exit(1)
 	}
-	schemaStore, err := schemas.NewSchemaStore()
+	schemaStore, err := schemas.NewSchemaStore(schemasDir)
 	if err != nil {
 		logger.Error("Failed to create schema store", "error", err)
 		os.Exit(1)

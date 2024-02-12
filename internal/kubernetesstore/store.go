@@ -3,20 +3,20 @@ package kubernetesstore
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 
+	"github.com/slarwise/yamlls/internal/cachedhttp"
 	. "github.com/slarwise/yamlls/internal/errors"
 )
 
 type KubernetesStore struct {
-	Index []GroupVersionKind
+	Index      []GroupVersionKind
+	httpclient cachedhttp.CachedHttpClient
 }
 
-func NewKubernetesStore() (KubernetesStore, error) {
+func NewKubernetesStore(httpclient cachedhttp.CachedHttpClient) (KubernetesStore, error) {
 	url := "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/_definitions.json"
-	data, err := callTheInternet(url)
+	data, err := httpclient.GetBody(url)
 	if err != nil {
 		return KubernetesStore{}, fmt.Errorf("Failed to download schema index: %s", err)
 	}
@@ -25,7 +25,8 @@ func NewKubernetesStore() (KubernetesStore, error) {
 		return KubernetesStore{}, fmt.Errorf("Failed to get schema index: %s", err)
 	}
 	return KubernetesStore{
-		Index: index,
+		Index:      index,
+		httpclient: httpclient,
 	}, nil
 }
 
@@ -75,7 +76,7 @@ func (s *KubernetesStore) GetSchema(group, version, kind string) ([]byte, error)
 		return []byte{}, ErrorSchemaNotFound
 	}
 	URL := buildSchemaURL(group, version, kind)
-	data, err := callTheInternet(URL)
+	data, err := s.httpclient.GetBody(URL)
 	if err != nil {
 		return []byte{}, fmt.Errorf("Failed to download schema: %s", err)
 	}
@@ -106,20 +107,4 @@ func buildSchemaURL(group, version, kind string) string {
 		basename = fmt.Sprintf("%s-%s-%s.json", strings.ToLower(kind), group, version)
 	}
 	return fmt.Sprintf("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/%s", basename)
-}
-
-func callTheInternet(URL string) ([]byte, error) {
-	resp, err := http.Get(URL)
-	if err != nil {
-		return []byte{}, err
-	}
-	if resp.StatusCode != 200 {
-		return []byte{}, fmt.Errorf("Got non-200 status code: %s", resp.Status)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return []byte{}, err
-	}
-	return body, nil
 }

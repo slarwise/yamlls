@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/slarwise/yamlls/internal/cachedhttp"
 	"github.com/slarwise/yamlls/internal/crdstore"
 	. "github.com/slarwise/yamlls/internal/errors"
 	"github.com/slarwise/yamlls/internal/jsonschemastore"
@@ -17,16 +18,20 @@ type SchemaStore struct {
 	jsonSchemaStore jsonschemastore.JsonSchemaStore
 }
 
-func NewSchemaStore() (SchemaStore, error) {
-	kubernetesStore, err := kubernetesstore.NewKubernetesStore()
+func NewSchemaStore(cacheDir string) (SchemaStore, error) {
+	httpclient, err := cachedhttp.NewCachedHttpClient(cacheDir)
+	if err != nil {
+		return SchemaStore{}, fmt.Errorf("Could not create cached http client: %s", err)
+	}
+	kubernetesStore, err := kubernetesstore.NewKubernetesStore(httpclient)
 	if err != nil {
 		return SchemaStore{}, fmt.Errorf("Could not create kubernetes schema store: %s", err)
 	}
-	crdStore, err := crdstore.NewCRDStore()
+	crdStore, err := crdstore.NewCRDStore(httpclient)
 	if err != nil {
 		return SchemaStore{}, fmt.Errorf("Could not create CRD schema store: %s", err)
 	}
-	jsonSchemaStore, err := jsonschemastore.NewJsonSchemaStore()
+	jsonSchemaStore, err := jsonschemastore.NewJsonSchemaStore(httpclient)
 	if err != nil {
 		return SchemaStore{}, fmt.Errorf("Could not create json schema store: %s", err)
 	}
