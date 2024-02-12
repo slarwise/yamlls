@@ -2,6 +2,7 @@
 
 ## Features
 
+- No configuration needed to detect schemas
 - Hover: Show description of field
 - Code Action: Open documentation in browser
 - Diagnostics: Validate yaml syntax
@@ -9,13 +10,13 @@
 - Diagnostics - Kustomization: Warn when not all yaml files in the current dir
   are included as resources
 
-## Schema stores
+## Automatically detected schemas
 
-- [Kubernetes](github.com/yannh/kubernetes-json-schema). Detected from `kind`
-  and `apiVersion`.
-- [Custom Resource Definitions](github.com/datreeio/CRDs-catalog). Detected from
-  `kind` and `apiVersion`.
-- [Others](json.schemastore.org). Detected from filename.
+- [Kubernetes Resources](https://github.com/yannh/kubernetes-json-schema).
+  Detected from `kind` and `apiVersion`.
+- [Custom Resource Definitions](https://github.com/datreeio/CRDs-catalog).
+  Detected from `kind` and `apiVersion`.
+- [JSON Schema Store](https://json.schemastore.org). Detected from filename.
 
 ## Installation
 
