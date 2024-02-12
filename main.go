@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
 	"strings"
 
 	"github.com/slarwise/yamlls/internal/kustomization"
@@ -19,6 +20,8 @@ import (
 	"github.com/xeipuuv/gojsonschema"
 	"go.lsp.dev/protocol"
 )
+
+var logger *slog.Logger
 
 func main() {
 	cacheDir, err := os.UserCacheDir()
@@ -37,7 +40,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer logfile.Close()
-	logger := slog.New(slog.NewJSONHandler(logfile, nil))
+	logger = slog.New(slog.NewJSONHandler(logfile, nil))
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Error("panic", "recovered", r)
@@ -109,18 +112,20 @@ func main() {
 			diagnostics = append(diagnostics, validYamlDiagnostics...)
 			if len(validYamlDiagnostics) == 0 {
 				yamlDocuments := parser.SplitIntoYamlDocuments(doc.Text)
+				lineOffset := 0
 				for _, d := range yamlDocuments {
 					schema, err := schemaStore.GetSchema(doc.URI.Filename(), d)
 					if err != nil {
 						logger.Error("Could not find schema", "filename", doc.URI.Filename(), "error", err)
 					} else {
-						validateDiagnostics, err := validateAgainstSchema(schema, d)
+						validateDiagnostics, err := validateAgainstSchema(schema, d, uint32(lineOffset))
 						if err != nil {
 							logger.Error("Could not validate against schema: %s", err)
 						} else {
 							diagnostics = append(diagnostics, validateDiagnostics...)
 						}
 					}
+					lineOffset += len(strings.Split(d, "\n"))
 				}
 			}
 			if path.Base(doc.URI.Filename()) == "kustomization.yaml" {
@@ -317,7 +322,10 @@ func main() {
 	os.Exit(1)
 }
 
-func validateAgainstSchema(schema []byte, text string) ([]protocol.Diagnostic, error) {
+var errorPathToParserPath = regexp.MustCompile(`\.(\d+)`)
+var trailingIndex = regexp.MustCompile(`\[\d+\]$`)
+
+func validateAgainstSchema(schema []byte, text string, lineOffset uint32) ([]protocol.Diagnostic, error) {
 	diagnostics := []protocol.Diagnostic{}
 	jsonText, err := yaml.YAMLToJSON([]byte(text))
 	if err != nil {
@@ -333,15 +341,27 @@ func validateAgainstSchema(schema []byte, text string) ([]protocol.Diagnostic, e
 		return diagnostics, nil
 	}
 	for _, e := range result.Errors() {
+		path := fmt.Sprintf("$.%s", e.Field())
+		details := e.Details()
+		path = errorPathToParserPath.ReplaceAllString(path, "[$1]")
+		property, found := details["property"]
+		if found && e.Type() != "required" {
+			path = fmt.Sprintf("%s.%s", path, property)
+		}
+		path = trailingIndex.ReplaceAllString(path, "")
+		line, startColumn, endColumn, err := parser.GetPositionForPath(path, text)
+		if err != nil {
+			logger.Error("Failed to get position for path", "path", path)
+		}
 		d := protocol.Diagnostic{
 			Range: protocol.Range{
 				Start: protocol.Position{
-					Line:      0,
-					Character: 0,
+					Line:      line + lineOffset,
+					Character: startColumn,
 				},
 				End: protocol.Position{
-					Line:      1,
-					Character: 0,
+					Line:      line + lineOffset,
+					Character: endColumn,
 				},
 			},
 			Severity: protocol.DiagnosticSeverityError,

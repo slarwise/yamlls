@@ -2,18 +2,19 @@ package parser
 
 import (
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/parser"
+	yamlparser "github.com/goccy/go-yaml/parser"
 	"github.com/tidwall/gjson"
 )
 
 func GetPathAtPosition(line uint32, column uint32, text string) (string, error) {
-	f, err := parser.ParseBytes([]byte(text), 0)
+	f, err := yamlparser.ParseBytes([]byte(text), 0)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("Could not parse yaml: %s", err)
 	}
 	var capturer pathCapturer
 	for _, doc := range f.Docs {
@@ -27,17 +28,37 @@ func GetPathAtPosition(line uint32, column uint32, text string) (string, error) 
 	return "", errors.New("Not found")
 }
 
+func GetPositionForPath(yamlPath string, text string) (uint32, uint32, uint32, error) {
+	f, err := yamlparser.ParseBytes([]byte(text), 0)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("Could not parse yaml: %s", err)
+	}
+	var capturer pathCapturer
+	for _, doc := range f.Docs {
+		ast.Walk(&capturer, doc.Body)
+	}
+	for i, path := range capturer.Paths {
+		if yamlPath == path {
+			return capturer.Lines[i], capturer.StartColumns[i], capturer.EndColumns[i], nil
+		}
+	}
+	return 0, 0, 0, errors.New("Not found")
+}
+
 type pathCapturer struct {
 	Paths        []string
 	Lines        []uint32 // 0-indexed
 	StartColumns []uint32 // 0-indexed
 	EndColumns   []uint32
+	Types        []ast.NodeType
 }
 
 func (c *pathCapturer) Visit(node ast.Node) ast.Visitor {
-	// if node.Type() != ast.StringType {
-	// return c
-	// }
+	if node.Type() == ast.MappingValueType || node.Type() == ast.MappingType {
+		// Skip nodes of type `:`
+		return c
+	}
+	c.Types = append(c.Types, node.Type())
 	c.Paths = append(c.Paths, node.GetPath())
 	token := node.GetToken()
 	c.Lines = append(c.Lines, uint32(token.Position.Line-1))

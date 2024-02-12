@@ -25,7 +25,6 @@ go install github.com/slarwise/yamlls@latest
 
 ## Potential TODO's
 
-- Put validation diagnostics on the correct line
 - Use a better documentation previewer, `json-schema.app` has not been working
   since Feb 1
 - Completion
