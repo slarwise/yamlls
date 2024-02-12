@@ -25,24 +25,22 @@ go install github.com/slarwise/yamlls@latest
 
 ## Potential TODO's
 
-- [ ] Put validation diagnostics on the correct line
-- [ ] Support multi-document yamls
-- [ ] Use a better documentation previewer, `json-schema.app` has not been
-      working since Feb 1
-- [ ] Completion
-  - [ ] If `kind` or `apiVersion` is given, give completion suggestions for the
-        other
-  - [ ] Suggest `enum`s from the schema
-- [ ] Code actions
-  - [ ] Fill all required fields. Use placeholders that fit the type, or the
-        first `enum`.
-  - [ ] Add all files in the current directory to .resources in a Kustomization
-        file
-- [ ] Background http server
-  - [ ] Show external documentation in a nice way for the currently open file.
-        Can do this since we get notifications when the user changes file.
-- [ ] Workspace: If there is an kustomization file, connect the resources
-      somehow? And give info if there are things that don't match
+- Put validation diagnostics on the correct line
+- Use a better documentation previewer, `json-schema.app` has not been working
+  since Feb 1
+- Completion
+  - If `kind` or `apiVersion` is given, give completion suggestions for the
+    other
+  - Suggest `enum`s from the schema
+- Code actions
+  - Fill all required fields. Use placeholders that fit the type, or the first
+    `enum`.
+  - Add all files in the current directory to .resources in a Kustomization file
+- Background http server
+  - Show external documentation in a nice way for the currently open file. Can
+    do this since we get notifications when the user changes file.
+- Workspace: If there is an kustomization file, connect the resources somehow?
+  And give info if there are things that don't match
 
 ## Bugs
 
