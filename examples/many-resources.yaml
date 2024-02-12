@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: NAME
+  labels:
+    app: APP
+spec:
+  ports:
+    - name: SERVICE-PORT-NAME
+      port: 80
+      targetPort: CONTAINER-PORT-NAME-OR-NUMBER
+  selector:
+    app: APP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: NAME
+  labels:
+    app: APP
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: APP
+  template:
+    metadata:
+      labels:
+        app: APP
+    spec:
+      containers:
+        - name: APP
+          image: IMAGE
+          ports:
+            - containerPort: 80
+              name: PORT-NAME
