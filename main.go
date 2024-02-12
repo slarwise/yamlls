@@ -108,15 +108,18 @@ func main() {
 			validYamlDiagnostics := isValidYaml(doc.Text)
 			diagnostics = append(diagnostics, validYamlDiagnostics...)
 			if len(validYamlDiagnostics) == 0 {
-				schema, err := schemaStore.GetSchema(doc.URI.Filename(), doc.Text)
-				if err != nil {
-					logger.Error("Could not find schema", "filename", doc.URI.Filename(), "error", err)
-				} else {
-					validateDiagnostics, err := validateAgainstSchema(schema, doc.Text)
+				yamlDocuments := parser.SplitIntoYamlDocuments(doc.Text)
+				for _, d := range yamlDocuments {
+					schema, err := schemaStore.GetSchema(doc.URI.Filename(), d)
 					if err != nil {
-						logger.Error("Could not validate against schema: %s", err)
+						logger.Error("Could not find schema", "filename", doc.URI.Filename(), "error", err)
 					} else {
-						diagnostics = append(diagnostics, validateDiagnostics...)
+						validateDiagnostics, err := validateAgainstSchema(schema, d)
+						if err != nil {
+							logger.Error("Could not validate against schema: %s", err)
+						} else {
+							diagnostics = append(diagnostics, validateDiagnostics...)
+						}
 					}
 				}
 			}
