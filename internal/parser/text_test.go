@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -59,6 +60,38 @@ func TestGetGroupKindVersion(t *testing.T) {
 			}
 			if kind != test.kind {
 				t.Fatalf("Expected `%s`, got `%s`", test.kind, kind)
+			}
+		})
+	}
+}
+
+func TestSplitIntoYamlDocuments(t *testing.T) {
+	tests := map[string]struct {
+		text     string
+		expected []string
+	}{
+		"one-document": {
+			text:     "a",
+			expected: []string{"a"},
+		},
+		"two-documents": {
+			text:     "a\n---\nb",
+			expected: []string{"a\n", "b"},
+		},
+		"prefix": {
+			text:     "---\na\n---\nb",
+			expected: []string{"a\n", "b"},
+		},
+		"suffix": {
+			text:     "a\n---\nb\n---",
+			expected: []string{"a\n", "b\n"},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			actual := SplitIntoYamlDocuments(test.text)
+			if !slices.Equal(actual, test.expected) {
+				t.Fatalf("Expected %v, got %v", test.expected, actual)
 			}
 		})
 	}

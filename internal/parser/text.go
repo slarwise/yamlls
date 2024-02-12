@@ -30,3 +30,10 @@ func GetGroupVersionKind(text string) (string, string, string) {
 	kind = strings.Trim(kind, `"`)
 	return group, version, kind
 }
+
+func SplitIntoYamlDocuments(text string) []string {
+	text = strings.TrimPrefix(text, "---\n")
+	text = strings.TrimSuffix(text, "---\n")
+	text = strings.TrimSuffix(text, "---")
+	return strings.Split(text, "---\n")
+}

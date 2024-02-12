@@ -164,7 +164,22 @@ func main() {
 			return nil, err
 		}
 		text := filenameToContents[params.TextDocument.URI.Filename()]
-		schema, err := schemaStore.GetSchema(params.TextDocument.URI.Filename(), text)
+		yamlDocuments := parser.SplitIntoYamlDocuments(text)
+		currentDocument := ""
+		lineOffset := 0
+		for _, d := range yamlDocuments {
+			documentLines := len(strings.Split(d, "\n"))
+			if int(params.Position.Line) <= lineOffset+documentLines {
+				currentDocument = d
+				break
+			}
+			lineOffset += documentLines
+		}
+		if currentDocument == "" {
+			logger.Error("Failed to find corresponding yaml document from position", "positionLine", params.Position.Line, "nDocuments", len(yamlDocuments))
+			return nil, errors.New("Not found")
+		}
+		schema, err := schemaStore.GetSchema(params.TextDocument.URI.Filename(), currentDocument)
 		if err != nil {
 			logger.Error("Could not find schema", "filename", params.TextDocument.URI.Filename(), "error", err)
 			return nil, errors.New("Not found")
