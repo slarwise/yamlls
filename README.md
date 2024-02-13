@@ -63,8 +63,7 @@ vim.api.nvim_create_autocmd('Filetype', {
 
 ## Potential TODO's
 
-- Use a better documentation previewer, `json-schema.app` has not been working
-  since Feb 1
+- Use an offline documentation generator
 - Completion
   - If `kind` or `apiVersion` is given, give completion suggestions for the
     other
