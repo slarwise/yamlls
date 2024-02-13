@@ -20,7 +20,7 @@
 
 ## Installation
 
-```
+```bash
 go install github.com/slarwise/yamlls@latest
 ```
 
