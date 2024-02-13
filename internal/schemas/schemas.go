@@ -73,7 +73,7 @@ func (s *SchemaStore) GetSchema(filename string, text string) ([]byte, error) {
 
 func (s *SchemaStore) GetSchemaURL(filename string, text string) (string, error) {
 	group, version, kind := parser.GetGroupVersionKind(text)
-	if group != "" && version != "" && kind != "" {
+	if version != "" && kind != "" {
 		URL, err := s.kubernetesStore.GetSchemaURL(group, version, kind)
 		if err == nil {
 			return URL, nil
