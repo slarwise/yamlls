@@ -61,6 +61,21 @@ vim.api.nvim_create_autocmd('Filetype', {
 })
 ```
 
+## Development
+
+To try out changes using helix, you can do:
+
+```sh
+# Use yamlls in the current directory
+export PATH=.:"$PATH"
+# Update source code
+go build .
+hx examples/service.yaml -vvv
+# Test things
+# Run :log-open inside helix to see helix logs
+tail -f ~/Library/Caches/yamlls/log | jq # Follow the logs from yamlls (on a mac)
+```
+
 ## Potential TODO's
 
 - Use an offline documentation generator
