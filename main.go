@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path"
 	"regexp"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/xeipuuv/gojsonschema"
 	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 )
 
 var logger *slog.Logger
@@ -305,18 +305,12 @@ func main() {
 				return "", fmt.Errorf("Must provide 1 argument to external-docs, the viewerURL")
 			}
 			viewerURL := params.Arguments[0].(string)
-			// TODO: Use showDocument instead
-			// Currently not in a Helix release, it was added on Jan 17
-			// https://github.com/helix-editor/helix/pull/8865
-			// showDocumentParams := protocol.ShowDocumentParams{
-			// 	URI:       uri.New(viewerURL),
-			// 	External:  true,
-			// 	TakeFocus: true,
-			// }
-			// m.Request("window/showDocument", showDocumentParams)
-			if err = exec.Command("open", viewerURL).Run(); err != nil {
-				logger.Error("Failed to execute command", "error", err)
+			showDocumentParams := protocol.ShowDocumentParams{
+				URI:       uri.URI(viewerURL),
+				External:  true,
+				TakeFocus: true,
 			}
+			m.Request("window/showDocument", showDocumentParams)
 		default:
 			return "", fmt.Errorf("Command not found %s", params.Command)
 		}

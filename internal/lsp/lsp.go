@@ -284,6 +284,10 @@ func (m *Mux) handleNotification(req Request) {
 
 func (m *Mux) handleRequestResponse(req Request) {
 	log := m.log.With(slog.Any("id", req.ID), slog.String("method", req.Method))
+	if req.Method == "" {
+		// The method for window/showDocument is empty, nothing to handle on that response
+		return
+	}
 	mh, ok := m.methodHandlers[req.Method]
 	if !ok {
 		log.Error("No method handler found")

@@ -7,6 +7,7 @@ require (
 	github.com/tidwall/gjson v1.17.0
 	github.com/xeipuuv/gojsonschema v1.2.0
 	go.lsp.dev/protocol v0.12.0
+	go.lsp.dev/uri v0.3.0
 )
 
 require (
@@ -18,7 +19,6 @@ require (
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
 	go.lsp.dev/jsonrpc2 v0.10.0 // indirect
 	go.lsp.dev/pkg v0.0.0-20210717090340-384b27a52fb2 // indirect
-	go.lsp.dev/uri v0.3.0 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.8.0 // indirect
 	go.uber.org/zap v1.21.0 // indirect
