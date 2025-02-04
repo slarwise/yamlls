@@ -3,6 +3,7 @@ package jsonschemastore
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 
 	"github.com/slarwise/yamlls/internal/cachedhttp"
@@ -18,11 +19,13 @@ type SchemaInfo struct {
 }
 
 type JsonSchemaStore struct {
-	Index      []SchemaInfo
-	httpclient cachedhttp.CachedHttpClient
+	Index             []SchemaInfo
+	httpclient        cachedhttp.CachedHttpClient
+	FilenameOverrides map[string]string // Override the filename pattern, e.g. .prettierrc -> https://my.schema.for.prettier/schema.json
+	logger            *slog.Logger
 }
 
-func NewJsonSchemaStore(httpclient cachedhttp.CachedHttpClient) (JsonSchemaStore, error) {
+func NewJsonSchemaStore(httpclient cachedhttp.CachedHttpClient, logger *slog.Logger) (JsonSchemaStore, error) {
 	indexResponse, err := httpclient.GetBody("https://www.schemastore.org/api/json/catalog.json")
 	if err != nil {
 		return JsonSchemaStore{}, fmt.Errorf("Failed to download index: %s", err)
@@ -34,6 +37,7 @@ func NewJsonSchemaStore(httpclient cachedhttp.CachedHttpClient) (JsonSchemaStore
 	return JsonSchemaStore{
 		Index:      index,
 		httpclient: httpclient,
+		logger:     logger,
 	}, nil
 }
 
@@ -48,11 +52,16 @@ func parseIndexResponse(data []byte) ([]SchemaInfo, error) {
 }
 
 func (s *JsonSchemaStore) GetSchema(filename string) ([]byte, error) {
-	schemaInfo, found := getMatchingSchemaInfo(s.Index, filename)
-	if !found {
+	var url string
+	if schemaUrl, found := s.FilenameOverrides[filepath.Base(filename)]; found {
+		url = schemaUrl
+	} else if schemaInfo, found := getMatchingSchemaInfo(s.Index, filename); found {
+		url = schemaInfo.URL
+	}
+	if url == "" {
 		return nil, ErrorSchemaNotFound
 	}
-	data, err := s.httpclient.GetBody(schemaInfo.URL)
+	data, err := s.httpclient.GetBody(url)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to call the internet: %s", err)
 	}
@@ -60,11 +69,16 @@ func (s *JsonSchemaStore) GetSchema(filename string) ([]byte, error) {
 }
 
 func (s *JsonSchemaStore) GetSchemaURL(filename string) (string, error) {
-	schemaInfo, found := getMatchingSchemaInfo(s.Index, filename)
-	if !found {
+	var url string
+	if schemaUrl, found := s.FilenameOverrides[filepath.Base(filename)]; found {
+		url = schemaUrl
+	} else if schemaInfo, found := getMatchingSchemaInfo(s.Index, filename); found {
+		url = schemaInfo.URL
+	}
+	if url == "" {
 		return "", ErrorSchemaNotFound
 	}
-	return schemaInfo.URL, nil
+	return url, nil
 }
 
 func getMatchingSchemaInfo(index []SchemaInfo, filename string) (SchemaInfo, bool) {

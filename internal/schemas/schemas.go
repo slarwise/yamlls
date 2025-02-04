@@ -2,6 +2,7 @@ package schemas
 
 import (
 	"fmt"
+	"log/slog"
 	"net/url"
 
 	"github.com/slarwise/yamlls/internal/cachedhttp"
@@ -18,7 +19,7 @@ type SchemaStore struct {
 	jsonSchemaStore jsonschemastore.JsonSchemaStore
 }
 
-func NewSchemaStore(cacheDir string) (SchemaStore, error) {
+func NewSchemaStore(cacheDir string, logger *slog.Logger) (SchemaStore, error) {
 	httpclient, err := cachedhttp.NewCachedHttpClient(cacheDir)
 	if err != nil {
 		return SchemaStore{}, fmt.Errorf("Could not create cached http client: %s", err)
@@ -31,7 +32,7 @@ func NewSchemaStore(cacheDir string) (SchemaStore, error) {
 	if err != nil {
 		return SchemaStore{}, fmt.Errorf("Could not create CRD schema store: %s", err)
 	}
-	jsonSchemaStore, err := jsonschemastore.NewJsonSchemaStore(httpclient)
+	jsonSchemaStore, err := jsonschemastore.NewJsonSchemaStore(httpclient, logger)
 	if err != nil {
 		return SchemaStore{}, fmt.Errorf("Could not create json schema store: %s", err)
 	}
@@ -40,6 +41,10 @@ func NewSchemaStore(cacheDir string) (SchemaStore, error) {
 		crdStore:        crdStore,
 		jsonSchemaStore: jsonSchemaStore,
 	}, nil
+}
+
+func (s *SchemaStore) AddFilenameOverrides(overrides map[string]string) {
+	s.jsonSchemaStore.FilenameOverrides = overrides
 }
 
 func (s *SchemaStore) GetSchema(filename string, text string) ([]byte, error) {

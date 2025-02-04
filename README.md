@@ -42,6 +42,10 @@ language-servers = ["yamlls"]
 
 [language-server.yamlls]
 command = "yamlls"
+# Optional configuration, if you want to override what json schema store returns for a specific
+# filename, define the filename and schema url here. Only works with basenames, i.e. it doesn't
+# work for schemas where the file pattern is something like '**/.github/workflows/*.yaml'.
+config = { filenameOverrides = { '.prettierrc' = "https://my.schema.for.prettier/schema.json" } }
 ```
 
 ### NeoVim

@@ -52,7 +52,7 @@ func main() {
 		logger.Error("Failed to create `yamlls/schemas` dir in cache directory", "cache_dir", cacheDir, "error", err)
 		os.Exit(1)
 	}
-	schemaStore, err := schemas.NewSchemaStore(schemasDir)
+	schemaStore, err := schemas.NewSchemaStore(schemasDir, logger)
 	if err != nil {
 		logger.Error("Failed to create schema store", "error", err)
 		os.Exit(1)
@@ -68,6 +68,29 @@ func main() {
 			return nil, err
 		}
 		logger.Info("Received initialize request", "params", initializeParams)
+		switch v := initializeParams.InitializationOptions.(type) {
+		case map[string]interface{}:
+			if overrides, found := v["filenameOverrides"]; found {
+				overrides, ok := overrides.(map[string]interface{})
+				if !ok {
+					return nil, fmt.Errorf("filenameOverrides must be a an object with strings as keys and strings as values")
+				}
+				parsedOverrides := map[string]string{}
+				for key, val := range overrides {
+					if val, ok := val.(string); ok {
+						parsedOverrides[key] = val
+					} else {
+						if !ok {
+							return nil, fmt.Errorf("filenameOverrides must be a an object with strings as keys and strings as values")
+						}
+					}
+				}
+				if ok {
+					schemaStore.AddFilenameOverrides(parsedOverrides)
+					logger.Info("Added filename overrides")
+				}
+			}
+		}
 
 		result := protocol.InitializeResult{
 			Capabilities: protocol.ServerCapabilities{
@@ -119,7 +142,7 @@ func main() {
 					} else {
 						validateDiagnostics, err := validateAgainstSchema(schema, d, uint32(lineOffset))
 						if err != nil {
-							logger.Error("Could not validate against schema: %s", err)
+							logger.Error("Could not validate against schema", "error", err)
 						} else {
 							diagnostics = append(diagnostics, validateDiagnostics...)
 						}
