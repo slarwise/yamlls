@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
+	"github.com/slarwise/yamlls/pkg/schemas"
 	"github.com/slarwise/yamlls/pkg/template"
 	"github.com/tidwall/gjson"
 	"github.com/xeipuuv/gojsonschema"
@@ -99,15 +100,9 @@ func mustGetSubSchema(schema map[string]any, path string) map[string]any {
 
 func mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion string) map[string]any {
 	// TODO: Support CRDs
-	var basename string
-	split := strings.Split(apiVersion, "/")
-	if len(split) == 1 {
-		version := split[0]
-		basename = fmt.Sprintf("%s-%s.json", strings.ToLower(kind), version)
-	} else {
-		group, version := split[0], split[1]
-		basename = fmt.Sprintf("%s-%s-%s.json", strings.ToLower(kind), group, version)
+	url, err := schemas.GetKubernetesSchemaUrl(kind, apiVersion)
+	if err != nil {
+		log.Fatalf("get url for kind `%s` and apiVersion `%s`: %v", kind, apiVersion, err)
 	}
-	url := fmt.Sprintf("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/%s", basename)
 	return mustLoadJsonSchema(url)
 }
