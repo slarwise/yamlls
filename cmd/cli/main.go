@@ -16,23 +16,31 @@ import (
 )
 
 // TODO:
-//   - Pick a schema based on kind and apiVersion
 //   - Pick a schema based on kind (interactive)
 //   - Pick a schema based on apiVersion (interactive)
 //   - Pick a schema based on group (interactive)
 //   - Update an existing document and using a path. E.g. I'm in the middle of writing the document and I just want to fill a specific field
 func main() {
 	log.SetFlags(0)
-	var schemaPath string
+	var schemaPath, path, kind, apiVersion string
 	flag.StringVar(&schemaPath, "schema", "", "A url (starting with http) or a file path to a `json schema`")
-	var path string
 	flag.StringVar(&path, "path", "", "A `path` to a field, e.g. `spec.template`")
+	flag.StringVar(&kind, "kind", "", "The `kind` of a kubernetes manifest, e.g. `Deployment`")
+	flag.StringVar(&apiVersion, "apiVersion", "", "The `apiVersion` of a kubernetes manifest, e.g. `apps/v1`")
 	flag.Parse()
-	if schemaPath == "" {
-		log.Fatalf("-schema must be set")
-	}
 
-	jsonSchema := mustLoadJsonSchema(schemaPath)
+	var jsonSchema map[string]any
+	if kind != "" || apiVersion != "" {
+		if kind == "" || apiVersion == "" {
+			log.Fatalf("both -kind and -apiVersion must be set")
+		}
+		jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion)
+	} else {
+		if schemaPath == "" {
+			log.Fatalf("-schema must be set")
+		}
+		jsonSchema = mustLoadJsonSchema(schemaPath)
+	}
 	jsonSchema = mustGetSubSchema(jsonSchema, path)
 	document, err := template.FillFromSchema(jsonSchema)
 	if err != nil {
@@ -87,4 +95,19 @@ func mustGetSubSchema(schema map[string]any, path string) map[string]any {
 		log.Fatalf("no subschema found on path %s", path)
 		return nil // hmm, this is unreachable
 	}
+}
+
+func mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion string) map[string]any {
+	// TODO: Support CRDs
+	var basename string
+	split := strings.Split(apiVersion, "/")
+	if len(split) == 1 {
+		version := split[0]
+		basename = fmt.Sprintf("%s-%s.json", strings.ToLower(kind), version)
+	} else {
+		group, version := split[0], split[1]
+		basename = fmt.Sprintf("%s-%s-%s.json", strings.ToLower(kind), group, version)
+	}
+	url := fmt.Sprintf("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/%s", basename)
+	return mustLoadJsonSchema(url)
 }
