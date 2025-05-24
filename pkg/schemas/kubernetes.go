@@ -12,12 +12,13 @@ import (
 // v1-namespace -> https://raw.githubusercontent.com/yannh/...
 var db map[string]string
 
-func GetKubernetesSchemaUrl(kind, apiVersion string) (string, error) {
-	if db == nil {
-		if err := initDatabase(); err != nil {
-			return "", fmt.Errorf("failed to get available kubernetes schemas: %v", err)
-		}
+func init() {
+	if err := initDatabase(); err != nil {
+		panic(fmt.Sprintf("initialize database for kubernetes schema store: %v", err))
 	}
+}
+
+func GetKubernetesSchemaUrl(kind, apiVersion string) (string, error) {
 	key := buildKey(kind, apiVersion)
 	url, found := db[key]
 	if !found {
