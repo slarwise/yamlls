@@ -70,6 +70,7 @@ func initDatabase() error {
 				basename = fmt.Sprintf("%s-%s.json", strings.ToLower(kind), version)
 				apiVersion = version
 			} else {
+				group = strings.TrimSuffix(group, ".k8s.io")
 				apiVersion = fmt.Sprintf("%s/%s", group, version)
 				basename = fmt.Sprintf("%s-%s-%s.json", strings.ToLower(kind), group, version)
 			}
