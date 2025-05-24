@@ -17,7 +17,6 @@ import (
 )
 
 // TODO:
-//   - Pick a schema based on kind (interactive)
 //   - Pick a schema based on apiVersion (interactive)
 //   - Pick a schema based on group (interactive)
 //   - Update an existing document and using a path. E.g. I'm in the middle of writing the document and I just want to fill a specific field
@@ -31,7 +30,33 @@ func main() {
 	flag.Parse()
 
 	var jsonSchema map[string]any
-	if kind != "" || apiVersion != "" {
+	if kind != "" && apiVersion == "" {
+		apiVersions := schemas.GetApiVersions(kind)
+		if len(apiVersions) == 0 {
+			log.Fatalf("no apiVersions found for kind `%s`", kind)
+		} else if len(apiVersions) == 1 {
+			jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersions[0])
+		} else {
+			var choice int
+			for {
+				log.Println("Pick one:")
+				for i, apiVersion := range apiVersions {
+					log.Printf("%d: %s", i, apiVersion)
+				}
+				_, err := fmt.Scanln(&choice)
+				if err != nil {
+					log.Print("try again")
+					continue
+				}
+				if choice >= len(apiVersions) {
+					log.Print("too big")
+				} else {
+					break
+				}
+			}
+			jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersions[choice])
+		}
+	} else if kind != "" || apiVersion != "" {
 		if kind == "" || apiVersion == "" {
 			log.Fatalf("both -kind and -apiVersion must be set")
 		}

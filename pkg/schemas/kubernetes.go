@@ -8,6 +8,27 @@ import (
 	"strings"
 )
 
+func GetKubernetesSchemaUrl(kind, apiVersion string) (string, error) {
+	key := buildKey(kind, apiVersion)
+	url, found := db[key]
+	if !found {
+		return "", fmt.Errorf("not found")
+	}
+	return url, nil
+}
+
+func GetApiVersions(kind string) []string {
+	kind = strings.ToLower(kind)
+	suffix := "-" + kind
+	var apiVersions []string
+	for key := range db {
+		if strings.HasSuffix(key, suffix) {
+			apiVersions = append(apiVersions, strings.TrimSuffix(key, suffix))
+		}
+	}
+	return apiVersions
+}
+
 // apps/v1-deployment -> https://raw.githubusercontent.com/yannh/...
 // v1-namespace -> https://raw.githubusercontent.com/yannh/...
 var db map[string]string
@@ -16,15 +37,6 @@ func init() {
 	if err := initDatabase(); err != nil {
 		panic(fmt.Sprintf("initialize database for kubernetes schema store: %v", err))
 	}
-}
-
-func GetKubernetesSchemaUrl(kind, apiVersion string) (string, error) {
-	key := buildKey(kind, apiVersion)
-	url, found := db[key]
-	if !found {
-		return "", fmt.Errorf("not found")
-	}
-	return url, nil
 }
 
 type DefinitionsResponse struct {
