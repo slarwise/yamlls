@@ -29,6 +29,12 @@ func GetApiVersions(kind string) []string {
 	return apiVersions
 }
 
+func PrintSchemas() {
+	for key, url := range db {
+		fmt.Println(key, url)
+	}
+}
+
 // apps/v1-deployment -> https://raw.githubusercontent.com/yannh/...
 // v1-namespace -> https://raw.githubusercontent.com/yannh/...
 var db map[string]string

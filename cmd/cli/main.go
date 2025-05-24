@@ -23,12 +23,18 @@ import (
 func main() {
 	log.SetFlags(0)
 	var schemaPath, path, kind, apiVersion string
+	var listDb bool
 	flag.StringVar(&schemaPath, "schema", "", "A url (starting with http) or a file path to a `json schema`")
 	flag.StringVar(&path, "path", "", "A `path` to a field, e.g. `spec.template`")
 	flag.StringVar(&kind, "kind", "", "The `kind` of a kubernetes manifest, e.g. `Deployment`")
 	flag.StringVar(&apiVersion, "apiVersion", "", "The `apiVersion` of a kubernetes manifest, e.g. `apps/v1`")
+	flag.BoolVar(&listDb, "list", false, "List the available kubernetes manifests")
 	flag.Parse()
 
+	if listDb {
+		schemas.PrintSchemas()
+		os.Exit(0)
+	}
 	var jsonSchema map[string]any
 	if kind != "" && apiVersion == "" {
 		apiVersions := schemas.GetApiVersions(kind)
