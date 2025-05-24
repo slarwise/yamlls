@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/slarwise/yamlls/internal/kustomization"
@@ -16,6 +17,7 @@ import (
 	"github.com/slarwise/yamlls/internal/schemas"
 
 	"github.com/goccy/go-yaml"
+	"github.com/tidwall/sjson"
 	"github.com/xeipuuv/gojsonschema"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -282,10 +284,13 @@ func main() {
 		yamlDocuments := parser.SplitIntoYamlDocuments(text)
 		currentDocument := ""
 		lineOffset := 0
+		var documentStart, documentEnd int
 		for _, d := range yamlDocuments {
 			documentLines := len(strings.Split(d, "\n"))
 			if int(params.Range.Start.Line) <= lineOffset+documentLines-1 {
 				currentDocument = d
+				documentStart = lineOffset
+				documentEnd = lineOffset + documentLines - 1
 				break
 			}
 			lineOffset += documentLines - 1
@@ -301,13 +306,30 @@ func main() {
 			return nil, errors.New("Not found")
 		}
 		viewerURL := schemas.DocsViewerURL(schemaURL)
+
 		response := []protocol.CodeAction{
 			{
 				Title: "Open documentation",
 				Command: &protocol.Command{
 					Title:     "Open documentation",
 					Command:   "external-docs",
-					Arguments: []interface{}{viewerURL},
+					Arguments: []any{viewerURL},
+				},
+			},
+			{
+				Title: "Fill document",
+				Command: &protocol.Command{
+					Title:     "Fill document",
+					Command:   "fill-document",
+					Arguments: []any{params.TextDocument.URI, currentDocument, false, params.Range.Start.Line, params.Range.Start.Character, documentStart, documentEnd},
+				},
+			},
+			{
+				Title: "Fill document with required fields",
+				Command: &protocol.Command{
+					Title:     "Fill document",
+					Command:   "fill-document",
+					Arguments: []any{params.TextDocument.URI, currentDocument, true, params.Range.Start.Line, params.Range.Start.Character, documentStart, documentEnd},
 				},
 			},
 		}
@@ -334,6 +356,74 @@ func main() {
 				TakeFocus: true,
 			}
 			m.Request("window/showDocument", showDocumentParams)
+		case "fill-document":
+			if len(params.Arguments) != 7 {
+				logger.Info("Expected 7 arguments to fill-document")
+				return "", fmt.Errorf("Expected 7 arguments to fill-document")
+			}
+			uri_ := params.Arguments[0].(string)
+			uri := protocol.DocumentURI(uri_)
+			currentDocument := params.Arguments[1].(string)
+			requiredOnly := params.Arguments[2].(bool)
+			line := uint32(params.Arguments[3].(float64))
+			column := uint32(params.Arguments[4].(float64))
+			documentStart := params.Arguments[5].(float64)
+			documentEnd := params.Arguments[6].(float64)
+			yamlPath, err := parser.GetPathAtPosition(line, column, currentDocument)
+			if err != nil {
+				logger.Error("Failed to get path at position", "line", line, "column", column)
+				return nil, errors.New("Not found")
+			}
+			schema, err := schemaStore.GetSchema(uri.Filename(), currentDocument)
+			if err != nil {
+				return nil, fmt.Errorf("get schema to fill document: %v", err)
+			}
+			subSchema, found := parser.GetSubSchema(yamlPath, schema)
+			if !found {
+				return nil, fmt.Errorf("could not find schema on path: %v", err)
+			}
+			fullDoc, err := fillDocument(subSchema, requiredOnly)
+			if err != nil {
+				return nil, fmt.Errorf("fill document: %v", err)
+			}
+			// TODO: We only want to touch the node that we are filling, not anything else in
+			// the document. It works pretty well to update the whole thing but it might change
+			// the order of the keys in other parts of the document. So insert only at the current
+			// line.
+			jsonPath := strings.TrimPrefix(yamlPath, "$.")
+			logger.Info("path", "json", jsonPath, "yaml", yamlPath, "current", currentDocument, "full", fullDoc)
+			currentDocumentJson, err := yaml.YAMLToJSON([]byte(currentDocument))
+			if err != nil {
+				return nil, fmt.Errorf("convert current document to json: %v", err)
+			}
+			logger.Info("path", "json", jsonPath, "yaml", yamlPath, "current", currentDocument, "full", fullDoc, "currentJson", currentDocumentJson)
+			updatedDoc, err := sjson.SetBytes([]byte(currentDocumentJson), jsonPath, fullDoc)
+			if err != nil {
+				return nil, fmt.Errorf("update current document: %v", err)
+			}
+			resultBytes, err := yaml.JSONToYAML(updatedDoc)
+			if err != nil {
+				return nil, fmt.Errorf("convert updated document to yaml: %v", err)
+			}
+			var resultYaml map[string]any
+			_ = yaml.Unmarshal(resultBytes, &resultYaml)
+			wellFormattedBytes, _ := yaml.MarshalWithOptions(resultYaml, yaml.IndentSequence(true))
+			applyParams := protocol.ApplyWorkspaceEditParams{
+				Edit: protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+						protocol.DocumentURI(uri): {
+							{
+								Range: protocol.Range{
+									Start: protocol.Position{Line: uint32(documentStart), Character: 0},
+									End:   protocol.Position{Line: uint32(documentEnd), Character: 0},
+								},
+								NewText: string(wellFormattedBytes),
+							},
+						},
+					},
+				},
+			}
+			m.Request("workspace/applyEdit", applyParams)
 		default:
 			return "", fmt.Errorf("Command not found %s", params.Command)
 		}
@@ -456,4 +546,154 @@ func kustomizationForgottenResources(filename string, text string) []protocol.Di
 		Message:  fmt.Sprintf("Resources not included: %s", forgottenFilesString),
 	}
 	return []protocol.Diagnostic{d}
+}
+
+func mustMarshalYaml(y any) string {
+	bytes, err := yaml.Marshal(y)
+	if err != nil {
+		panic(fmt.Sprintf("marshal yaml: %v", err))
+	}
+	return string(bytes)
+}
+
+func fillDocument(schema []byte, requiredOnly bool) (any, error) {
+	var jsonSchema map[string]any
+	if err := json.Unmarshal(schema, &jsonSchema); err != nil {
+		return nil, fmt.Errorf("unmarshal schema: %v", err)
+	}
+	logger.Info("jsonSchema", "jsonSchema", jsonSchema)
+	var fullDoc any
+	fullDoc, err := parseSchema(jsonSchema, requiredOnly)
+	if err != nil {
+		return nil, fmt.Errorf("create example for schema: %v", err)
+	}
+	fmt.Print(mustMarshalYaml(fullDoc))
+	return fullDoc, nil
+}
+
+func parseSchema(schema map[string]any, requiredOnly bool) (any, error) {
+	type_, found := schema["type"]
+	if found {
+		switch type_ := type_.(type) {
+		case string:
+			result, err := parseByType(type_, schema, requiredOnly)
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		case []any:
+			var singleType string
+			for _, v := range type_ {
+				v := v.(string)
+				if v == "null" {
+					continue
+				}
+				singleType = v
+				break
+			}
+			if singleType == "" {
+				return nil, fmt.Errorf("expected at least one type to be not null when type is an array, got %v", type_)
+			}
+			result, err := parseByType(singleType, schema, requiredOnly)
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		default:
+			return nil, fmt.Errorf("expected type to be a string or an array of strings, got %T", type_)
+		}
+	}
+
+	const_, found := schema["const"]
+	if found {
+		return const_, nil
+	}
+
+	enum, found := schema["enum"]
+	if found {
+		return enum.([]any)[0], nil
+	}
+
+	oneOf, found := schema["oneOf"]
+	if found {
+		first := oneOf.([]any)[0]
+		result, err := parseSchema(first.(map[string]any), requiredOnly)
+		if err != nil {
+			logger.Error("parse oneOf", "oneOf", oneOf, "error", err)
+			return nil, fmt.Errorf("parse oneOf: %v", err)
+		}
+		return result, nil
+	}
+
+	anyOf, found := schema["anyOf"]
+	if found {
+		first := anyOf.([]any)[0]
+		result, err := parseSchema(first.(map[string]any), requiredOnly)
+		if err != nil {
+			logger.Error("parse anyOf", "anyOf", anyOf, "error", err)
+			return nil, fmt.Errorf("parse anyOf: %v", err)
+		}
+		return result, nil
+	}
+
+	_, found = schema["x-kubernetes-preserve-unknown-fields"]
+	if found {
+		return map[string]any{}, nil
+	}
+
+	return nil, fmt.Errorf("expected schema to have type, enum, const, oneOf, anyOf, x-kubernetes-preserve-unknown-fields set, got %v", schema)
+}
+
+func parseByType(type_ string, schema map[string]any, requiredOnly bool) (any, error) {
+	switch type_ {
+	case "string":
+		return "", nil
+	case "integer":
+		return 0, nil
+	case "object":
+		properties, found := schema["properties"]
+		logger.Info("object", "properties", properties)
+		if !found {
+			return map[string]any{}, nil
+			// return nil, errors.New("expected a schema of type object to have properties")
+		}
+		result := map[string]any{}
+		var required []string
+		if requiredOnly {
+			required__, found := schema["required"]
+			if !found {
+				return result, nil
+			}
+			required_ := required__.([]any)
+			for _, r := range required_ {
+				required = append(required, r.(string))
+			}
+		}
+		for k, v := range properties.(map[string]any) {
+			if requiredOnly && !slices.Contains(required, k) {
+				continue
+			}
+			logger.Info("key", "k", k)
+			subResult, err := parseSchema(v.(map[string]any), requiredOnly)
+			if err != nil {
+				return nil, err
+			}
+			result[k] = subResult
+		}
+		return result, nil
+	case "boolean":
+		return false, nil
+	case "array":
+		items, found := schema["items"]
+		if !found {
+			return nil, errors.New("expected a schema of type array to have items")
+		}
+		subResult, err := parseSchema(items.(map[string]any), requiredOnly)
+		if err != nil {
+			return nil, err
+		}
+		return []any{subResult}, nil
+	default:
+		panic(fmt.Sprintf("type `%v` not implemented", type_))
+	}
 }

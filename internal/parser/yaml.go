@@ -79,6 +79,15 @@ func GetDescription(yamlPath string, schema []byte) (string, bool) {
 	return result.String(), true
 }
 
+func GetSubSchema(yamlPath string, schema []byte) ([]byte, bool) {
+	path := toSchemaPath(yamlPath)
+	result := gjson.GetBytes(schema, path)
+	if !result.Exists() {
+		return nil, false
+	}
+	return []byte(result.String()), true
+}
+
 func toSchemaPath(yamlPath string) string {
 	schemaPath := strings.TrimPrefix(yamlPath, "$.")
 	if schemaPath == "" {

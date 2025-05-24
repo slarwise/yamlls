@@ -1,3 +1,9 @@
-kind: Service
-apiVersion: v1
-spec: {}
+kind: Application
+apiVersion: argoproj.io/v1alpha1
+metadata: {}
+spec:
+  destination:
+    name: ""
+    namespace: ""
+    server: ""
+  project: ""

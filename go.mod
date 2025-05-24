@@ -4,7 +4,9 @@ go 1.21.5
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.6.1
-	github.com/tidwall/gjson v1.17.1
+	github.com/goccy/go-yaml v1.11.3
+	github.com/tidwall/gjson v1.18.0
+	github.com/tidwall/sjson v1.2.5
 	github.com/xeipuuv/gojsonschema v1.2.0
 	go.lsp.dev/protocol v0.12.0
 	go.lsp.dev/uri v0.3.0
@@ -25,7 +27,6 @@ require (
 
 require (
 	github.com/fatih/color v1.16.0 // indirect
-	github.com/goccy/go-yaml v1.11.3
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	golang.org/x/sys v0.19.0 // indirect
