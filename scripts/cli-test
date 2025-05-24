@@ -1,0 +1,7 @@
+#!/bin/bash
+
+set -e
+
+go run cmd/cli/main.go -schema https://raw.githubusercontent.com/yannh/kubernetes-json-schema/refs/heads/master/master-standalone-strict/service-v1.json -path spec
+echo
+go run cmd/cli/main.go -schema internal/schemas/test-data/schemas/kindapiversion/Deployment-apps\!v1.json -path 'spec.template.spec'
