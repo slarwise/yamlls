@@ -2,3 +2,4 @@
 test.yaml
 yamlls
 internal/schemas/test-data/schemas
+/cli
