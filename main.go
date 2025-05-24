@@ -17,6 +17,7 @@ import (
 	"github.com/slarwise/yamlls/internal/schemas"
 
 	"github.com/goccy/go-yaml"
+	"github.com/tidwall/sjson"
 	"github.com/xeipuuv/gojsonschema"
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -283,10 +284,13 @@ func main() {
 		yamlDocuments := parser.SplitIntoYamlDocuments(text)
 		currentDocument := ""
 		lineOffset := 0
+		var documentStart, documentEnd int
 		for _, d := range yamlDocuments {
 			documentLines := len(strings.Split(d, "\n"))
 			if int(params.Range.Start.Line) <= lineOffset+documentLines-1 {
 				currentDocument = d
+				documentStart = lineOffset
+				documentEnd = lineOffset + documentLines - 1
 				break
 			}
 			lineOffset += documentLines - 1
@@ -317,7 +321,7 @@ func main() {
 				Command: &protocol.Command{
 					Title:     "Fill document",
 					Command:   "fill-document",
-					Arguments: []any{params.TextDocument.URI, currentDocument, false, params.Range.Start.Line, params.Range.Start.Character},
+					Arguments: []any{params.TextDocument.URI, currentDocument, false, params.Range.Start.Line, params.Range.Start.Character, documentStart, documentEnd},
 				},
 			},
 			{
@@ -325,7 +329,7 @@ func main() {
 				Command: &protocol.Command{
 					Title:     "Fill document",
 					Command:   "fill-document",
-					Arguments: []any{params.TextDocument.URI, currentDocument, true, params.Range.Start.Line, params.Range.Start.Character},
+					Arguments: []any{params.TextDocument.URI, currentDocument, true, params.Range.Start.Line, params.Range.Start.Character, documentStart, documentEnd},
 				},
 			},
 		}
@@ -353,9 +357,9 @@ func main() {
 			}
 			m.Request("window/showDocument", showDocumentParams)
 		case "fill-document":
-			if len(params.Arguments) != 5 {
-				logger.Info("Expected 5 arguments to fill-document")
-				return "", fmt.Errorf("Expected 5 arguments to fill-document")
+			if len(params.Arguments) != 7 {
+				logger.Info("Expected 7 arguments to fill-document")
+				return "", fmt.Errorf("Expected 7 arguments to fill-document")
 			}
 			uri_ := params.Arguments[0].(string)
 			uri := protocol.DocumentURI(uri_)
@@ -363,12 +367,13 @@ func main() {
 			requiredOnly := params.Arguments[2].(bool)
 			line := uint32(params.Arguments[3].(float64))
 			column := uint32(params.Arguments[4].(float64))
+			documentStart := params.Arguments[5].(float64)
+			documentEnd := params.Arguments[6].(float64)
 			yamlPath, err := parser.GetPathAtPosition(line, column, currentDocument)
 			if err != nil {
 				logger.Error("Failed to get path at position", "line", line, "column", column)
 				return nil, errors.New("Not found")
 			}
-			indentLevel := strings.Count(yamlPath, ".") - 1
 			schema, err := schemaStore.GetSchema(uri.Filename(), currentDocument)
 			if err != nil {
 				return nil, fmt.Errorf("get schema to fill document: %v", err)
@@ -377,19 +382,24 @@ func main() {
 			if !found {
 				return nil, fmt.Errorf("could not find schema on path: %v", err)
 			}
-			logger.Info("subSchema", "subSchema", subSchema)
 			fullDoc, err := fillDocument(subSchema, requiredOnly)
 			if err != nil {
 				return nil, fmt.Errorf("fill document: %v", err)
 			}
-			logger.Info("fullDoc", "fullDoc", fullDoc)
-			resultBytes, err := yaml.Marshal(fullDoc)
+			jsonPath := strings.TrimPrefix(yamlPath, "$.")
+			logger.Info("path", "json", jsonPath, "yaml", yamlPath, "current", currentDocument, "full", fullDoc)
+			currentDocumentJson, err := yaml.YAMLToJSON([]byte(currentDocument))
 			if err != nil {
-				return nil, fmt.Errorf("marshal filled document: %v", err)
+				return nil, fmt.Errorf("convert current document to json: %v", err)
 			}
-			var indented string
-			for _, line := range strings.FieldsFunc(string(resultBytes), func(r rune) bool { return r == '\n' }) {
-				indented += strings.Repeat(" ", 2*indentLevel+2) + line + "\n"
+			logger.Info("path", "json", jsonPath, "yaml", yamlPath, "current", currentDocument, "full", fullDoc, "currentJson", currentDocumentJson)
+			updatedDoc, err := sjson.SetBytes([]byte(currentDocumentJson), jsonPath, fullDoc)
+			if err != nil {
+				return nil, fmt.Errorf("update current document: %v", err)
+			}
+			resultBytes, err := yaml.JSONToYAML(updatedDoc)
+			if err != nil {
+				return nil, fmt.Errorf("convert updated document to yaml: %v", err)
 			}
 			applyParams := protocol.ApplyWorkspaceEditParams{
 				Edit: protocol.WorkspaceEdit{
@@ -397,10 +407,10 @@ func main() {
 						protocol.DocumentURI(uri): {
 							{
 								Range: protocol.Range{
-									Start: protocol.Position{Line: line + 1, Character: 0},
-									End:   protocol.Position{Line: line + 1, Character: 0},
+									Start: protocol.Position{Line: uint32(documentStart), Character: 0},
+									End:   protocol.Position{Line: uint32(documentEnd), Character: 0},
 								},
-								NewText: indented,
+								NewText: string(resultBytes),
 							},
 						},
 					},
