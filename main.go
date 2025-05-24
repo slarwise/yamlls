@@ -401,6 +401,9 @@ func main() {
 			if err != nil {
 				return nil, fmt.Errorf("convert updated document to yaml: %v", err)
 			}
+			var resultYaml map[string]any
+			_ = yaml.Unmarshal(resultBytes, &resultYaml)
+			wellFormattedBytes, _ := yaml.MarshalWithOptions(resultYaml, yaml.IndentSequence(true))
 			applyParams := protocol.ApplyWorkspaceEditParams{
 				Edit: protocol.WorkspaceEdit{
 					Changes: map[protocol.DocumentURI][]protocol.TextEdit{
@@ -410,7 +413,7 @@ func main() {
 									Start: protocol.Position{Line: uint32(documentStart), Character: 0},
 									End:   protocol.Position{Line: uint32(documentEnd), Character: 0},
 								},
-								NewText: string(resultBytes),
+								NewText: string(wellFormattedBytes),
 							},
 						},
 					},
