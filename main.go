@@ -386,6 +386,10 @@ func main() {
 			if err != nil {
 				return nil, fmt.Errorf("fill document: %v", err)
 			}
+			// TODO: We only want to touch the node that we are filling, not anything else in
+			// the document. It works pretty well to update the whole thing but it might change
+			// the order of the keys in other parts of the document. So insert only at the current
+			// line.
 			jsonPath := strings.TrimPrefix(yamlPath, "$.")
 			logger.Info("path", "json", jsonPath, "yaml", yamlPath, "current", currentDocument, "full", fullDoc)
 			currentDocumentJson, err := yaml.YAMLToJSON([]byte(currentDocument))
