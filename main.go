@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,15 +9,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/slarwise/yamlls/internal/kustomization"
 	"github.com/slarwise/yamlls/internal/lsp"
-	"github.com/slarwise/yamlls/internal/parser"
-	"github.com/slarwise/yamlls/internal/schemas"
+	"github.com/slarwise/yamlls/pkg/schema2"
 
-	"github.com/goccy/go-yaml"
-	"github.com/xeipuuv/gojsonschema"
 	"go.lsp.dev/protocol"
-	"go.lsp.dev/uri"
 )
 
 var logger *slog.Logger
@@ -39,6 +33,13 @@ func main() {
 		slog.Error("Failed to create log output file", "error", err)
 		os.Exit(1)
 	}
+
+	kubernetesStore, err := schema2.NewKubernetesStore()
+	if err != nil {
+		slog.Error("create kubernetes store", "err", err)
+		os.Exit(1)
+	}
+
 	defer logfile.Close()
 	logger = slog.New(slog.NewJSONHandler(logfile, nil))
 	defer func() {
@@ -46,17 +47,6 @@ func main() {
 			logger.Error("panic", "recovered", r)
 		}
 	}()
-
-	schemasDir := path.Join(cacheDir, "yamlls", "schemas")
-	if err := os.MkdirAll(schemasDir, 0755); err != nil {
-		logger.Error("Failed to create `yamlls/schemas` dir in cache directory", "cache_dir", cacheDir, "error", err)
-		os.Exit(1)
-	}
-	schemaStore, err := schemas.NewSchemaStore(schemasDir, logger)
-	if err != nil {
-		logger.Error("Failed to create schema store", "error", err)
-		os.Exit(1)
-	}
 
 	m := lsp.NewMux(logger, os.Stdin, os.Stdout)
 
@@ -68,29 +58,7 @@ func main() {
 			return nil, err
 		}
 		logger.Info("Received initialize request", "params", initializeParams)
-		switch v := initializeParams.InitializationOptions.(type) {
-		case map[string]interface{}:
-			if overrides, found := v["filenameOverrides"]; found {
-				overrides, ok := overrides.(map[string]interface{})
-				if !ok {
-					return nil, fmt.Errorf("filenameOverrides must be a an object with strings as keys and strings as values")
-				}
-				parsedOverrides := map[string]string{}
-				for key, val := range overrides {
-					if val, ok := val.(string); ok {
-						parsedOverrides[key] = val
-					} else {
-						if !ok {
-							return nil, fmt.Errorf("filenameOverrides must be a an object with strings as keys and strings as values")
-						}
-					}
-				}
-				if ok {
-					schemaStore.AddFilenameOverrides(parsedOverrides)
-					logger.Info("Added filename overrides")
-				}
-			}
-		}
+		// TODO: Support filenameOverrides
 
 		result := protocol.InitializeResult{
 			Capabilities: protocol.ServerCapabilities{
@@ -101,9 +69,7 @@ func main() {
 					Commands: []string{"external-docs"},
 				},
 			},
-			ServerInfo: &protocol.ServerInfo{
-				Name: "yamlls",
-			},
+			ServerInfo: &protocol.ServerInfo{Name: "yamlls"},
 		}
 		return result, nil
 	})
@@ -129,29 +95,9 @@ func main() {
 	go func() {
 		for doc := range documentUpdates {
 			filenameToContents[doc.URI.Filename()] = doc.Text
-			diagnostics := []protocol.Diagnostic{}
-			validYamlDiagnostics := isValidYaml(doc.Text)
-			diagnostics = append(diagnostics, validYamlDiagnostics...)
-			if len(validYamlDiagnostics) == 0 {
-				yamlDocuments := parser.SplitIntoYamlDocuments(doc.Text)
-				lineOffset := 0
-				for _, d := range yamlDocuments {
-					schema, err := schemaStore.GetSchema(doc.URI.Filename(), d)
-					if err != nil {
-						logger.Error("Could not find schema", "filename", doc.URI.Filename(), "error", err)
-					} else {
-						validateDiagnostics, err := validateAgainstSchema(schema, d, uint32(lineOffset))
-						if err != nil {
-							logger.Error("Could not validate against schema", "error", err)
-						} else {
-							diagnostics = append(diagnostics, validateDiagnostics...)
-						}
-					}
-					lineOffset += len(strings.Split(d, "\n"))
-				}
-			}
-			if path.Base(doc.URI.Filename()) == "kustomization.yaml" {
-				diagnostics = append(diagnostics, kustomizationForgottenResources(doc.URI.Filename(), doc.Text)...)
+			diagnostics, err := validateFile(doc.Text, kubernetesStore)
+			if err != nil {
+				logger.Error("validate file", "err", err)
 			}
 			m.Notify(protocol.MethodTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 				URI:         doc.URI,
@@ -177,13 +123,7 @@ func main() {
 		if err := json.Unmarshal(rawParams, &params); err != nil {
 			return err
 		}
-
-		documentUpdates <- protocol.TextDocumentItem{
-			URI:     params.TextDocument.URI,
-			Version: params.TextDocument.Version,
-			Text:    params.ContentChanges[0].Text,
-		}
-
+		documentUpdates <- protocol.TextDocumentItem{URI: params.TextDocument.URI, Version: params.TextDocument.Version, Text: params.ContentChanges[0].Text}
 		return nil
 	})
 
@@ -193,151 +133,31 @@ func main() {
 		if err := json.Unmarshal(rawParams, &params); err != nil {
 			return nil, err
 		}
-		text := filenameToContents[params.TextDocument.URI.Filename()]
-		yamlDocuments := parser.SplitIntoYamlDocuments(text)
-		currentDocument := ""
-		lineOffset := 0
-		for _, d := range yamlDocuments {
-			documentLines := len(strings.Split(d, "\n"))
-			if int(params.Position.Line) <= lineOffset+documentLines {
-				currentDocument = d
-				break
-			}
-			lineOffset += documentLines
-		}
-		if currentDocument == "" {
-			logger.Error("Failed to find corresponding yaml document from position", "positionLine", params.Position.Line, "nDocuments", len(yamlDocuments))
-			return nil, errors.New("Not found")
-		}
-		schema, err := schemaStore.GetSchema(params.TextDocument.URI.Filename(), currentDocument)
+		contents := filenameToContents[params.TextDocument.URI.Filename()]
+		description, err := getDescription(contents, int(params.Position.Line), int(params.Position.Character), kubernetesStore)
 		if err != nil {
-			logger.Error("Could not find schema", "filename", params.TextDocument.URI.Filename(), "error", err)
-			return nil, errors.New("Not found")
+			logger.Error("failed to get description", "line", params.Position.Line, "char", params.Position.Character, "err", err)
+			return nil, nil
+		} else if description == "" {
+			return nil, nil
 		}
-		yamlPath, err := parser.GetPathAtPosition(params.Position.Line, params.Position.Character, text)
-		if err != nil {
-			logger.Error("Failed to get path at position", "line", params.Position.Line, "column", params.Position.Character)
-			return nil, errors.New("Not found")
-		}
-		description, found := parser.GetDescription(yamlPath, schema)
-		if !found {
-			logger.Error("Failed to get description", "yamlPath", yamlPath)
-			return nil, errors.New("Not found")
-		}
+
 		return protocol.Hover{
 			Contents: protocol.MarkupContent{
-				Kind:  "markdown",
+				Kind:  protocol.PlainText,
 				Value: description,
 			},
 		}, nil
 	})
 
 	m.HandleMethod("textDocument/completion", func(rawParams json.RawMessage) (any, error) {
-		logger.Info("Received textDocument/completion request")
-		var params protocol.CompletionParams
-		if err := json.Unmarshal(rawParams, &params); err != nil {
-			return nil, err
-		}
-		text := filenameToContents[params.TextDocument.URI.Filename()]
-		schema, err := schemaStore.GetSchema(params.TextDocument.URI.Filename(), text)
-		if err != nil {
-			logger.Error("Could not find schema", "filename", params.TextDocument.URI.Filename(), "error", err)
-			return nil, errors.New("Not found")
-		}
-		// TODO: This fails when there is a syntax error, which it will be
-		// when you haven't finished writing the field name. Perhaps get the
-		// node with one less indent?
-		yamlPath, err := parser.GetPathAtPosition(params.Position.Line, params.Position.Character, text)
-		if err != nil {
-			logger.Error("Failed to get path at position", "line", params.Position.Line, "column", params.Position.Character)
-			return nil, errors.New("Not found")
-		}
-		parentPath := parser.GetPathToParent(yamlPath)
-		logger.Info("Computed parent path", "parent_path", parentPath)
-		properties, found := parser.GetProperties(parentPath, schema)
-		if !found {
-			logger.Error("Failed to get properties", "yaml_path", yamlPath)
-			return nil, errors.New("Not found")
-		}
-		result := protocol.CompletionList{}
-		for _, p := range properties {
-			result.Items = append(result.Items, protocol.CompletionItem{
-				Label: p,
-				Documentation: protocol.MarkupContent{
-					Kind:  "markdown",
-					Value: "TODO: Description",
-				},
-			})
-		}
-		return result, nil
+		logger.Info("Receiver textDocument/completion request, not supported")
+		return nil, nil
 	})
 
 	m.HandleMethod(protocol.MethodTextDocumentCodeAction, func(rawParams json.RawMessage) (any, error) {
-		logger.Info(fmt.Sprintf("Received %s request", protocol.MethodTextDocumentCodeAction))
-		var params protocol.CodeActionParams
-		if err := json.Unmarshal(rawParams, &params); err != nil {
-			return nil, err
-		}
-		text := filenameToContents[params.TextDocument.URI.Filename()]
-		yamlDocuments := parser.SplitIntoYamlDocuments(text)
-		currentDocument := ""
-		lineOffset := 0
-		for _, d := range yamlDocuments {
-			documentLines := len(strings.Split(d, "\n"))
-			if int(params.Range.Start.Line) <= lineOffset+documentLines-1 {
-				currentDocument = d
-				break
-			}
-			lineOffset += documentLines - 1
-		}
-		if currentDocument == "" {
-			logger.Error("Failed to find corresponding yaml document from position", "positionLine", params.Range.Start.Line, "nDocuments", len(yamlDocuments))
-			return nil, errors.New("Not found")
-		}
-		logger.Info("Current document", "current", currentDocument)
-		schemaURL, err := schemaStore.GetSchemaURL(params.TextDocument.URI.Filename(), currentDocument)
-		if err != nil {
-			logger.Error("Could not find schema URL", "filename", params.TextDocument.URI.Filename(), "error", err)
-			return nil, errors.New("Not found")
-		}
-		viewerURL := schemas.DocsViewerURL(schemaURL)
-		response := []protocol.CodeAction{
-			{
-				Title: "Open documentation",
-				Command: &protocol.Command{
-					Title:     "Open documentation",
-					Command:   "external-docs",
-					Arguments: []interface{}{viewerURL},
-				},
-			},
-		}
-		return response, nil
-	})
-
-	m.HandleMethod(protocol.MethodWorkspaceExecuteCommand, func(rawParams json.RawMessage) (any, error) {
-		logger.Info(fmt.Sprintf("Received %s request", protocol.MethodWorkspaceExecuteCommand))
-		var params protocol.ExecuteCommandParams
-		if err := json.Unmarshal(rawParams, &params); err != nil {
-			return nil, err
-		}
-		logger.Info("Received command", "command", params.Command, "args", params.Arguments)
-		switch params.Command {
-		case "external-docs":
-			if len(params.Arguments) != 1 {
-				logger.Info("Must provide 1 argument to external-docs, the viewerURL")
-				return "", fmt.Errorf("Must provide 1 argument to external-docs, the viewerURL")
-			}
-			viewerURL := params.Arguments[0].(string)
-			showDocumentParams := protocol.ShowDocumentParams{
-				URI:       uri.URI(viewerURL),
-				External:  true,
-				TakeFocus: true,
-			}
-			m.Request("window/showDocument", showDocumentParams)
-		default:
-			return "", fmt.Errorf("Command not found %s", params.Command)
-		}
-		return "", nil
+		logger.Info("Received textDocument/codeAction request, not supported")
+		return nil, nil
 	})
 
 	logger.Info("Handler set up", "log_path", logpath)
@@ -354,106 +174,68 @@ func main() {
 	os.Exit(1)
 }
 
-var errorPathToParserPath = regexp.MustCompile(`\.(\d+)`)
-var trailingIndex = regexp.MustCompile(`\[\d+\]$`)
-
-func validateAgainstSchema(schema []byte, text string, lineOffset uint32) ([]protocol.Diagnostic, error) {
+func validateFile(contents string, store schema2.Store) ([]protocol.Diagnostic, error) {
+	errors := schema2.ValidateFile(contents, store)
 	diagnostics := []protocol.Diagnostic{}
-	jsonText, err := yaml.YAMLToJSON([]byte(text))
-	if err != nil {
-		return diagnostics, fmt.Errorf("Failed to convert yaml to json: %s", err)
-	}
-	schemaLoader := gojsonschema.NewBytesLoader(schema)
-	documentLoader := gojsonschema.NewBytesLoader(jsonText)
-	result, err := gojsonschema.Validate(schemaLoader, documentLoader)
-	if err != nil {
-		return diagnostics, fmt.Errorf("Failed to validate against schema: %s", err)
-	}
-	if result.Valid() {
-		return diagnostics, nil
-	}
-	for _, e := range result.Errors() {
-		path := fmt.Sprintf("$.%s", e.Field())
-		details := e.Details()
-		path = errorPathToParserPath.ReplaceAllString(path, "[$1]")
-		property, found := details["property"]
-		if found && e.Type() != "required" {
-			path = fmt.Sprintf("%s.%s", path, property)
-		}
-		path = trailingIndex.ReplaceAllString(path, "")
-		line, startColumn, endColumn, err := parser.GetPositionForPath(path, text)
-		if err != nil {
-			logger.Error("Failed to get position for path", "path", path)
-		}
-		d := protocol.Diagnostic{
+	for _, e := range errors {
+		diagnostics = append(diagnostics, protocol.Diagnostic{
 			Range: protocol.Range{
 				Start: protocol.Position{
-					Line:      line + lineOffset,
-					Character: startColumn,
+					Line:      uint32(e.Position.LineStart),
+					Character: uint32(e.Position.CharStart),
 				},
 				End: protocol.Position{
-					Line:      line + lineOffset,
-					Character: endColumn,
+					Line:      uint32(e.Position.LineEnd),
+					Character: uint32(e.Position.CharEnd),
 				},
 			},
 			Severity: protocol.DiagnosticSeverityError,
 			Source:   "yamlls",
-			Message:  e.Description(),
-		}
-		diagnostics = append(diagnostics, d)
+			Message:  e.Message,
+		})
 	}
 	return diagnostics, nil
 }
 
-func isValidYaml(text string) []protocol.Diagnostic {
-	ds := []protocol.Diagnostic{}
-	var output interface{}
-	lines := strings.Split(text, "\n")
-	if err := yaml.Unmarshal([]byte(text), &output); err != nil {
-		d := protocol.Diagnostic{
-			Range: protocol.Range{
-				Start: protocol.Position{
-					Line:      0,
-					Character: 0,
-				},
-				End: protocol.Position{
-					Line:      uint32(len(lines) - 1),
-					Character: uint32(len(lines[len(lines)-1])),
-				},
-			},
-			Severity: protocol.DiagnosticSeverityError,
-			Source:   "yamlls",
-			Message:  "Invalid yaml",
-		}
-		ds = append(ds, d)
-	}
-	return ds
-}
+var arrayPath = regexp.MustCompile(`\.\d+`)
 
-func kustomizationForgottenResources(filename string, text string) []protocol.Diagnostic {
-	forgottenFiles, err := kustomization.FilesNotIncluded(path.Dir(filename), text)
-	forgottenFilesString := strings.Join(forgottenFiles, ", ")
-	if err != nil {
-		return []protocol.Diagnostic{}
+func getDescription(contents string, line, char int, store schema2.Store) (string, error) {
+	ranges := schema2.GetDocumentPositions(contents)
+	var maybeValidDocument string
+	for _, r := range ranges {
+		if r.Start <= line && line < r.End {
+			lines := strings.FieldsFunc(contents, func(r rune) bool { return r == '\n' })
+			maybeValidDocument = strings.Join(lines[r.Start:r.End], "\n")
+			line = line - r.Start
+		}
 	}
-	if len(forgottenFiles) == 0 {
-		return []protocol.Diagnostic{}
+	document, valid := schema2.NewYamlDocument(maybeValidDocument)
+	if !valid {
+		return "", fmt.Errorf("current yaml document is invalid")
 	}
-	line := kustomization.GetResourcesLine(text)
-	d := protocol.Diagnostic{
-		Range: protocol.Range{
-			Start: protocol.Position{
-				Line:      uint32(line),
-				Character: 0,
-			},
-			End: protocol.Position{
-				Line:      uint32(line),
-				Character: uint32(len("resources:")),
-			},
-		},
-		Severity: protocol.DiagnosticSeverityHint,
-		Source:   "yamlls",
-		Message:  fmt.Sprintf("Resources not included: %s", forgottenFilesString),
+	paths := document.Paths()
+	path, found := paths.AtCursor(line, char)
+	if !found {
+		// Happens if the cursor is not on a property
+		return "", fmt.Errorf("No yaml path found at position %d:%d. Paths: %v", line, char, paths)
 	}
-	return []protocol.Diagnostic{d}
+	schema, schemaFound := store.Get(string(document))
+	if !schemaFound {
+		return "", fmt.Errorf("no schema found for current document")
+	}
+	// Turn spec.ports.0.name into spec.ports[].name
+	path = arrayPath.ReplaceAllString(path, "[]")
+	pathFound := false
+	var description string
+	documentation := schema.Docs()
+	for _, property := range documentation {
+		if property.Path == path {
+			description = property.Description
+			pathFound = true
+		}
+	}
+	if !pathFound {
+		return "", fmt.Errorf("could not find path %s in documentation", path)
+	}
+	return description, nil
 }

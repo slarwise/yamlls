@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "anything": {
+      "x-kubernetes-preserve-unknown-fields": true,
+      "description": "An object that can be anything"
+    }
+  }
+}
