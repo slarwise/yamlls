@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/slarwise/yamlls/internal/kustomization"
@@ -301,13 +302,30 @@ func main() {
 			return nil, errors.New("Not found")
 		}
 		viewerURL := schemas.DocsViewerURL(schemaURL)
+
 		response := []protocol.CodeAction{
 			{
 				Title: "Open documentation",
 				Command: &protocol.Command{
 					Title:     "Open documentation",
 					Command:   "external-docs",
-					Arguments: []interface{}{viewerURL},
+					Arguments: []any{viewerURL},
+				},
+			},
+			{
+				Title: "Fill document",
+				Command: &protocol.Command{
+					Title:     "Fill document",
+					Command:   "fill-document",
+					Arguments: []any{params.TextDocument.URI, currentDocument, false},
+				},
+			},
+			{
+				Title: "Fill document with required fields",
+				Command: &protocol.Command{
+					Title:     "Fill document",
+					Command:   "fill-document",
+					Arguments: []any{params.TextDocument.URI, currentDocument, true},
 				},
 			},
 		}
@@ -334,6 +352,43 @@ func main() {
 				TakeFocus: true,
 			}
 			m.Request("window/showDocument", showDocumentParams)
+		case "fill-document":
+			if len(params.Arguments) != 3 {
+				logger.Info("Must provide uri, schema and required fields only to fill-document")
+				return "", fmt.Errorf("Must provide uri, schema and required fields only to fill-document")
+			}
+			uri_ := params.Arguments[0].(string)
+			uri := protocol.DocumentURI(uri_)
+			currentDocument := params.Arguments[1].(string)
+			requiredOnly := params.Arguments[2].(bool)
+			schema, err := schemaStore.GetSchema(uri.Filename(), currentDocument)
+			if err != nil {
+				return nil, fmt.Errorf("get schema to fill document: %v", err)
+			}
+			fullDoc, err := fillDocument(schema, requiredOnly)
+			if err != nil {
+				return nil, fmt.Errorf("fill document: %v", err)
+			}
+			resultBytes, err := yaml.Marshal(fullDoc)
+			if err != nil {
+				return nil, fmt.Errorf("marshal filled document: %v", err)
+			}
+			applyParams := protocol.ApplyWorkspaceEditParams{
+				Edit: protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+						protocol.DocumentURI(uri): {
+							{
+								Range: protocol.Range{
+									Start: protocol.Position{Line: 0, Character: 0},
+									End:   protocol.Position{Line: 0, Character: 0},
+								},
+								NewText: string(resultBytes),
+							},
+						},
+					},
+				},
+			}
+			m.Request("workspace/applyEdit", applyParams)
 		default:
 			return "", fmt.Errorf("Command not found %s", params.Command)
 		}
@@ -456,4 +511,153 @@ func kustomizationForgottenResources(filename string, text string) []protocol.Di
 		Message:  fmt.Sprintf("Resources not included: %s", forgottenFilesString),
 	}
 	return []protocol.Diagnostic{d}
+}
+
+func mustMarshalYaml(y any) string {
+	bytes, err := yaml.Marshal(y)
+	if err != nil {
+		panic(fmt.Sprintf("marshal yaml: %v", err))
+	}
+	return string(bytes)
+}
+
+func fillDocument(schema []byte, requiredOnly bool) (any, error) {
+	var jsonSchema map[string]any
+	if err := json.Unmarshal(schema, &jsonSchema); err != nil {
+		return nil, fmt.Errorf("unmarshal schema: %v", err)
+	}
+	logger.Info("schema", "schema", jsonSchema)
+	var fullDoc any
+	fullDoc, err := parseSchema(jsonSchema, requiredOnly)
+	if err != nil {
+		return nil, fmt.Errorf("create example for schema: %v", err)
+	}
+	fmt.Print(mustMarshalYaml(fullDoc))
+	return fullDoc, nil
+}
+
+func parseSchema(schema map[string]any, requiredOnly bool) (any, error) {
+	type_, found := schema["type"]
+	if found {
+		switch type_ := type_.(type) {
+		case string:
+			result, err := parseByType(type_, schema, requiredOnly)
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		case []any:
+			var singleType string
+			for _, v := range type_ {
+				v := v.(string)
+				if v == "null" {
+					continue
+				}
+				singleType = v
+				break
+			}
+			if singleType == "" {
+				return nil, fmt.Errorf("expected at least one type to be not null when type is an array, got %v", type_)
+			}
+			result, err := parseByType(singleType, schema, requiredOnly)
+			if err != nil {
+				return nil, err
+			}
+			return result, nil
+		default:
+			return nil, fmt.Errorf("expected type to be a string or an array of strings, got %T", type_)
+		}
+	}
+
+	const_, found := schema["const"]
+	if found {
+		return const_, nil
+	}
+
+	enum, found := schema["enum"]
+	if found {
+		return enum.([]any)[0], nil
+	}
+
+	oneOf, found := schema["oneOf"]
+	if found {
+		first := oneOf.([]any)[0]
+		result, err := parseSchema(first.(map[string]any), requiredOnly)
+		if err != nil {
+			logger.Error("parse oneOf", "oneOf", oneOf, "error", err)
+			return nil, fmt.Errorf("parse oneOf: %v", err)
+		}
+		return result, nil
+	}
+
+	anyOf, found := schema["anyOf"]
+	if found {
+		first := anyOf.([]any)[0]
+		result, err := parseSchema(first.(map[string]any), requiredOnly)
+		if err != nil {
+			logger.Error("parse anyOf", "anyOf", anyOf, "error", err)
+			return nil, fmt.Errorf("parse anyOf: %v", err)
+		}
+		return result, nil
+	}
+
+	_, found = schema["x-kubernetes-preserve-unknown-fields"]
+	if found {
+		return map[string]any{}, nil
+	}
+
+	return nil, fmt.Errorf("expected schema to have type, enum, const, oneOf, anyOf, x-kubernetes-preserve-unknown-fields set, got %v", schema)
+}
+
+func parseByType(type_ string, schema map[string]any, requiredOnly bool) (any, error) {
+	logger.Info("parseByType", "type", type_)
+	switch type_ {
+	case "string":
+		return "", nil
+	case "integer":
+		return 0, nil
+	case "object":
+		properties, found := schema["properties"]
+		if !found {
+			return map[string]any{}, nil
+			// return nil, errors.New("expected a schema of type object to have properties")
+		}
+		result := map[string]any{}
+		required__, found := schema["required"]
+		if !found {
+			return result, nil
+		}
+		var required []string
+		if requiredOnly {
+			required_ := required__.([]any)
+			for _, r := range required_ {
+				required = append(required, r.(string))
+			}
+		}
+		for k, v := range properties.(map[string]any) {
+			if requiredOnly && !slices.Contains(required, k) {
+				continue
+			}
+			subResult, err := parseSchema(v.(map[string]any), requiredOnly)
+			if err != nil {
+				return nil, err
+			}
+			result[k] = subResult
+		}
+		return result, nil
+	case "boolean":
+		return false, nil
+	case "array":
+		items, found := schema["items"]
+		if !found {
+			return nil, errors.New("expected a schema of type array to have items")
+		}
+		subResult, err := parseSchema(items.(map[string]any), requiredOnly)
+		if err != nil {
+			return nil, err
+		}
+		return []any{subResult}, nil
+	default:
+		panic(fmt.Sprintf("type `%v` not implemented", type_))
+	}
 }
