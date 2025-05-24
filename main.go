@@ -317,7 +317,7 @@ func main() {
 				Command: &protocol.Command{
 					Title:     "Fill document",
 					Command:   "fill-document",
-					Arguments: []any{params.TextDocument.URI, currentDocument, false},
+					Arguments: []any{params.TextDocument.URI, currentDocument, false, params.Range.Start.Line, params.Range.Start.Character},
 				},
 			},
 			{
@@ -325,7 +325,7 @@ func main() {
 				Command: &protocol.Command{
 					Title:     "Fill document",
 					Command:   "fill-document",
-					Arguments: []any{params.TextDocument.URI, currentDocument, true},
+					Arguments: []any{params.TextDocument.URI, currentDocument, true, params.Range.Start.Line, params.Range.Start.Character},
 				},
 			},
 		}
@@ -353,25 +353,43 @@ func main() {
 			}
 			m.Request("window/showDocument", showDocumentParams)
 		case "fill-document":
-			if len(params.Arguments) != 3 {
-				logger.Info("Must provide uri, schema and required fields only to fill-document")
-				return "", fmt.Errorf("Must provide uri, schema and required fields only to fill-document")
+			if len(params.Arguments) != 5 {
+				logger.Info("Expected 5 arguments to fill-document")
+				return "", fmt.Errorf("Expected 5 arguments to fill-document")
 			}
 			uri_ := params.Arguments[0].(string)
 			uri := protocol.DocumentURI(uri_)
 			currentDocument := params.Arguments[1].(string)
 			requiredOnly := params.Arguments[2].(bool)
+			line := uint32(params.Arguments[3].(float64))
+			column := uint32(params.Arguments[4].(float64))
+			yamlPath, err := parser.GetPathAtPosition(line, column, currentDocument)
+			if err != nil {
+				logger.Error("Failed to get path at position", "line", line, "column", column)
+				return nil, errors.New("Not found")
+			}
+			indentLevel := strings.Count(yamlPath, ".") - 1
 			schema, err := schemaStore.GetSchema(uri.Filename(), currentDocument)
 			if err != nil {
 				return nil, fmt.Errorf("get schema to fill document: %v", err)
 			}
-			fullDoc, err := fillDocument(schema, requiredOnly)
+			subSchema, found := parser.GetSubSchema(yamlPath, schema)
+			if !found {
+				return nil, fmt.Errorf("could not find schema on path: %v", err)
+			}
+			logger.Info("subSchema", "subSchema", subSchema)
+			fullDoc, err := fillDocument(subSchema, requiredOnly)
 			if err != nil {
 				return nil, fmt.Errorf("fill document: %v", err)
 			}
+			logger.Info("fullDoc", "fullDoc", fullDoc)
 			resultBytes, err := yaml.Marshal(fullDoc)
 			if err != nil {
 				return nil, fmt.Errorf("marshal filled document: %v", err)
+			}
+			var indented string
+			for _, line := range strings.FieldsFunc(string(resultBytes), func(r rune) bool { return r == '\n' }) {
+				indented += strings.Repeat(" ", 2*indentLevel+2) + line + "\n"
 			}
 			applyParams := protocol.ApplyWorkspaceEditParams{
 				Edit: protocol.WorkspaceEdit{
@@ -379,10 +397,10 @@ func main() {
 						protocol.DocumentURI(uri): {
 							{
 								Range: protocol.Range{
-									Start: protocol.Position{Line: 0, Character: 0},
-									End:   protocol.Position{Line: 0, Character: 0},
+									Start: protocol.Position{Line: line + 1, Character: 0},
+									End:   protocol.Position{Line: line + 1, Character: 0},
 								},
-								NewText: string(resultBytes),
+								NewText: indented,
 							},
 						},
 					},
@@ -526,7 +544,7 @@ func fillDocument(schema []byte, requiredOnly bool) (any, error) {
 	if err := json.Unmarshal(schema, &jsonSchema); err != nil {
 		return nil, fmt.Errorf("unmarshal schema: %v", err)
 	}
-	logger.Info("schema", "schema", jsonSchema)
+	logger.Info("jsonSchema", "jsonSchema", jsonSchema)
 	var fullDoc any
 	fullDoc, err := parseSchema(jsonSchema, requiredOnly)
 	if err != nil {
@@ -610,7 +628,6 @@ func parseSchema(schema map[string]any, requiredOnly bool) (any, error) {
 }
 
 func parseByType(type_ string, schema map[string]any, requiredOnly bool) (any, error) {
-	logger.Info("parseByType", "type", type_)
 	switch type_ {
 	case "string":
 		return "", nil
@@ -618,17 +635,18 @@ func parseByType(type_ string, schema map[string]any, requiredOnly bool) (any, e
 		return 0, nil
 	case "object":
 		properties, found := schema["properties"]
+		logger.Info("object", "properties", properties)
 		if !found {
 			return map[string]any{}, nil
 			// return nil, errors.New("expected a schema of type object to have properties")
 		}
 		result := map[string]any{}
-		required__, found := schema["required"]
-		if !found {
-			return result, nil
-		}
 		var required []string
 		if requiredOnly {
+			required__, found := schema["required"]
+			if !found {
+				return result, nil
+			}
 			required_ := required__.([]any)
 			for _, r := range required_ {
 				required = append(required, r.(string))
@@ -638,6 +656,7 @@ func parseByType(type_ string, schema map[string]any, requiredOnly bool) (any, e
 			if requiredOnly && !slices.Contains(required, k) {
 				continue
 			}
+			logger.Info("key", "k", k)
 			subResult, err := parseSchema(v.(map[string]any), requiredOnly)
 			if err != nil {
 				return nil, err

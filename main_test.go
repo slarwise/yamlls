@@ -39,7 +39,7 @@ func TestFillDocument(t *testing.T) {
   	}
   }
 }`
-	actual_, err := fillDocument([]byte(schema))
+	actual_, err := fillDocument([]byte(schema), false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
