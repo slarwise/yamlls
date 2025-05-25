@@ -11,15 +11,16 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/slarwise/yamlls/pkg/schemas"
-	"github.com/slarwise/yamlls/pkg/template"
 	"github.com/tidwall/gjson"
-	"github.com/xeipuuv/gojsonschema"
 )
 
 // TODO:
 //   - Pick a schema based on apiVersion (interactive)
 //   - Pick a schema based on group (interactive)
 //   - Update an existing document and using a path. E.g. I'm in the middle of writing the document and I just want to fill a specific field
+//   - Maybe always render the whole schema and then pick out the needed bit from the path. That makes it easier to always set kind and
+//     apiVersion and remove status
+//   - Don't lowercase kind in the database, need to keep the casing so we can put it into the output document
 func main() {
 	log.SetFlags(0)
 	var schemaPath, path, kind, apiVersion string
@@ -35,13 +36,16 @@ func main() {
 		schemas.PrintSchemas()
 		os.Exit(0)
 	}
+
+	k8s := true
 	var jsonSchema map[string]any
 	if kind != "" && apiVersion == "" {
 		apiVersions := schemas.GetApiVersions(kind)
 		if len(apiVersions) == 0 {
 			log.Fatalf("no apiVersions found for kind `%s`", kind)
 		} else if len(apiVersions) == 1 {
-			jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersions[0])
+			apiVersion = apiVersions[0]
+			jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion)
 		} else {
 			var choice int
 			for {
@@ -60,7 +64,8 @@ func main() {
 					break
 				}
 			}
-			jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersions[choice])
+			apiVersion = apiVersions[choice]
+			jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion)
 		}
 	} else if kind != "" || apiVersion != "" {
 		if kind == "" || apiVersion == "" {
@@ -68,17 +73,27 @@ func main() {
 		}
 		jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion)
 	} else {
+		k8s = false
 		if schemaPath == "" {
 			log.Fatalf("-schema must be set")
 		}
 		jsonSchema = mustLoadJsonSchema(schemaPath)
 	}
 	jsonSchema = mustGetSubSchema(jsonSchema, path)
-	document, err := template.FillFromSchema(jsonSchema)
+	document, err := schemas.FillFromSchema(jsonSchema)
 	if err != nil {
 		log.Fatalf("fill schema: %v", err)
 	}
-	output, err := yaml.MarshalWithOptions(document, yaml.IndentSequence(true))
+	var document2 map[string]any
+	if k8s {
+		document2 = document.(map[string]any)
+		document2["kind"] = kind
+		document2["apiVersion"] = apiVersion
+		delete(document2, "status")
+	} else {
+		document2 = document.(map[string]any)
+	}
+	output, err := yaml.MarshalWithOptions(document2, yaml.IndentSequence(true))
 	if err != nil {
 		log.Fatalf("marshal document: %v", err)
 	}
@@ -93,20 +108,11 @@ func mustLoadJsonSchema(schemaPath string) map[string]any {
 		}
 		schemaPath = "file://" + filepath.Join(dir, schemaPath)
 	}
-
-	loader := gojsonschema.NewReferenceLoader(schemaPath)
-	if _, err := gojsonschema.NewSchemaLoader().Compile(loader); err != nil {
-		log.Fatalf("invalid json schema: %v", err)
-	}
-	jsonSchema_, err := loader.LoadJSON()
+	schema, err := schemas.LoadSchema(schemaPath)
 	if err != nil {
-		panic(fmt.Sprintf("the json schema is invalid json even though it was validated. This should not happen. Got %v", err))
+		log.Fatalf("load schema: %v", err)
 	}
-	jsonSchema, ok := jsonSchema_.(map[string]any)
-	if !ok {
-		panic("expected the json schema to be of type map[string]any")
-	}
-	return jsonSchema
+	return schema
 }
 
 // Support only path to properties, e.g. a.b.c, and c must be an object
