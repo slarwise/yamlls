@@ -20,11 +20,11 @@ func GetKubernetesSchemaUrl(kind, apiVersion string) (string, error) {
 }
 
 func GetApiVersions(kind string) []string {
-	suffix := "-" + kind
 	var apiVersions []string
 	for key := range db {
-		if strings.HasSuffix(key, suffix) {
-			apiVersions = append(apiVersions, strings.TrimSuffix(key, suffix))
+		currentKind, apiVersion := usMapleKey(key)
+		if currentKind == kind {
+			apiVersions = append(apiVersions, apiVersion)
 		}
 	}
 	return apiVersions
@@ -137,7 +137,16 @@ func getCustomResourceDefinitions() ([]Resource, error) {
 }
 
 func buildKey(kind, apiVersion string) string {
-	return fmt.Sprintf("%s-%s", apiVersion, kind)
+	return fmt.Sprintf("%s_%s", apiVersion, kind)
+}
+
+func usMapleKey(key string) (string, string) {
+	split := strings.Split(key, "_")
+	if len(split) != 2 {
+		panic(fmt.Sprintf("expected the key to look like `<apiVersion>_<key>`, got %s", key))
+	}
+	apiVersion, kind := split[0], split[1]
+	return kind, apiVersion
 }
 
 func getJson(url string, output any) error {

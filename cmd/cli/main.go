@@ -18,7 +18,6 @@ import (
 //   - Update an existing document and using a path. E.g. I'm in the middle of writing the document and I just want to fill a specific field
 //   - Maybe always render the whole schema and then pick out the needed bit from the path. That makes it easier to always set kind and
 //     apiVersion and remove status
-//   - Don't lowercase kind in the database, need to keep the casing so we can put it into the output document
 func main() {
 	log.SetFlags(0)
 	var schemaPath, path, kind, apiVersion string
