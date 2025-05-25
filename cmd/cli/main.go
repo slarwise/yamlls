@@ -74,8 +74,14 @@ func main() {
 		}
 		jsonSchema = mustLoadJsonSchema(schemaPath)
 	}
-	jsonSchema = mustGetSubSchema(jsonSchema, path)
 	document, err := schemas.FillFromSchema(jsonSchema)
+	if path != "" {
+		res := gjson.GetBytes(mustMarshalJson(document), path)
+		if !res.Exists() {
+			log.Fatalf("path `%s` not found", path)
+		}
+		document = res.Value()
+	}
 	if err != nil {
 		log.Fatalf("fill schema: %v", err)
 	}
@@ -84,6 +90,14 @@ func main() {
 		log.Fatalf("marshal document: %v", err)
 	}
 	fmt.Printf("%s", output)
+}
+
+func mustMarshalJson(data any) []byte {
+	bytes, err := json.Marshal(data)
+	if err != nil {
+		panic(fmt.Sprintf("expected a valid object at this point when marshalling to json: %v", err))
+	}
+	return bytes
 }
 
 func mustLoadJsonSchema(schemaPath string) map[string]any {
@@ -99,26 +113,6 @@ func mustLoadJsonSchema(schemaPath string) map[string]any {
 		log.Fatalf("load schema: %v", err)
 	}
 	return schema
-}
-
-// Support only path to properties, e.g. a.b.c, and c must be an object
-func mustGetSubSchema(schema map[string]any, path string) map[string]any {
-	if path == "" {
-		return schema
-	}
-	path = "properties." + strings.ReplaceAll(path, ".", ".properties.")
-	bytes, err := json.Marshal(schema)
-	if err != nil {
-		log.Fatalf("expected schema to be valid json, got %v", err)
-	}
-	result := gjson.GetBytes(bytes, path)
-	switch value := result.Value().(type) {
-	case map[string]any:
-		return value
-	default:
-		log.Fatalf("no subschema found on path %s", path)
-		return nil // hmm, this is unreachable
-	}
 }
 
 func mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion string) map[string]any {
