@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/goccy/go-yaml"
 )
 
 func GetKubernetesSchemaUrl(kind, apiVersion string) (string, error) {
@@ -18,7 +20,6 @@ func GetKubernetesSchemaUrl(kind, apiVersion string) (string, error) {
 }
 
 func GetApiVersions(kind string) []string {
-	kind = strings.ToLower(kind)
 	suffix := "-" + kind
 	var apiVersions []string
 	for key := range db {
@@ -45,27 +46,48 @@ func init() {
 	}
 }
 
+func initDatabase() error {
+	db = map[string]string{}
+	nativeResources, err := getNativeResourceDefinitions()
+	if err != nil {
+		return fmt.Errorf("get native resource definitions: %v", err)
+	}
+	crds, err := getCustomResourceDefinitions()
+	if err != nil {
+		return fmt.Errorf("get custom resource definitions: %v", err)
+	}
+
+	allResources := append(nativeResources, crds...)
+	for _, resource := range allResources {
+		key := buildKey(resource.Kind, resource.ApiVersion)
+		db[key] = resource.Url
+	}
+	return nil
+}
+
+type Resource struct{ Kind, ApiVersion, Url string }
+
 type DefinitionsResponse struct {
 	Definitions map[string]Definition `json:"definitions"`
 }
 
 type Definition struct {
-	GVK []XKubernetesGroupVersionKind `json:"x-kubernetes-group-version-kind,omitempty"`
+	GVK []GroupVersionKind `json:"x-kubernetes-group-version-kind,omitempty"`
 }
 
-type XKubernetesGroupVersionKind struct {
+type GroupVersionKind struct {
 	Group   string `json:"group"`
-	Kind    string `json:"kind"`
 	Version string `json:"version"`
+	Kind    string `json:"kind"`
 }
 
-func initDatabase() error {
-	db = map[string]string{}
+func getNativeResourceDefinitions() ([]Resource, error) {
 	definitionsUrl := "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/_definitions.json"
 	var resp DefinitionsResponse
 	if err := getJson(definitionsUrl, &resp); err != nil {
-		return fmt.Errorf("get definitions in yannh/kubernetes-json-schema: %v", err)
+		return nil, fmt.Errorf("get definitions in yannh/kubernetes-json-schema: %v", err)
 	}
+	var resources []Resource
 	for _, d := range resp.Definitions {
 		if d.GVK != nil {
 			gvk := d.GVK[0]
@@ -80,16 +102,42 @@ func initDatabase() error {
 				apiVersion = fmt.Sprintf("%s/%s", group, version)
 				basename = fmt.Sprintf("%s-%s-%s.json", strings.ToLower(kind), group, version)
 			}
-			key := buildKey(gvk.Kind, apiVersion)
 			url := fmt.Sprintf("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/%s", basename)
-			db[key] = url
+			resources = append(resources, Resource{
+				Kind:       kind,
+				ApiVersion: apiVersion,
+				Url:        url,
+			})
 		}
 	}
-	return nil
+	return resources, nil
+}
+
+func getCustomResourceDefinitions() ([]Resource, error) {
+	indexUrl := "https://raw.githubusercontent.com/datreeio/CRDs-catalog/refs/heads/main/index.yaml"
+	var index map[string][]struct {
+		Kind       string `yaml:"kind"`
+		ApiVersion string `yaml:"apiVersion"`
+		Filename   string `yaml:"filename"`
+	}
+	if err := getYaml(indexUrl, &index); err != nil {
+		return nil, fmt.Errorf("get index: %v", err)
+	}
+	var allCrds []Resource
+	for _, crds := range index {
+		for _, crd := range crds {
+			allCrds = append(allCrds, Resource{
+				Kind:       crd.Kind,
+				ApiVersion: crd.ApiVersion,
+				Url:        fmt.Sprintf("https://raw.githubusercontent.com/datreeio/CRDs-catalog/refs/heads/main/%s", crd.Filename),
+			})
+		}
+	}
+	return allCrds, nil
 }
 
 func buildKey(kind, apiVersion string) string {
-	return fmt.Sprintf("%s-%s", apiVersion, strings.ToLower(kind))
+	return fmt.Sprintf("%s-%s", apiVersion, kind)
 }
 
 func getJson(url string, output any) error {
@@ -106,6 +154,25 @@ func getJson(url string, output any) error {
 		return fmt.Errorf("%s - %s", resp.Status, body)
 	}
 	if err := json.Unmarshal(body, output); err != nil {
+		return fmt.Errorf("unmarshal body: %v", err)
+	}
+	return nil
+}
+
+func getYaml(url string, output any) error {
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("%v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read body: %v", err)
+	}
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("%s - %s", resp.Status, body)
+	}
+	if err := yaml.Unmarshal(body, output); err != nil {
 		return fmt.Errorf("unmarshal body: %v", err)
 	}
 	return nil

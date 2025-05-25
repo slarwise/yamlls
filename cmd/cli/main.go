@@ -15,8 +15,6 @@ import (
 )
 
 // TODO:
-//   - Pick a schema based on apiVersion (interactive)
-//   - Pick a schema based on group (interactive)
 //   - Update an existing document and using a path. E.g. I'm in the middle of writing the document and I just want to fill a specific field
 //   - Maybe always render the whole schema and then pick out the needed bit from the path. That makes it easier to always set kind and
 //     apiVersion and remove status
@@ -37,7 +35,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	k8s := true
 	var jsonSchema map[string]any
 	if kind != "" && apiVersion == "" {
 		apiVersions := schemas.GetApiVersions(kind)
@@ -73,7 +70,6 @@ func main() {
 		}
 		jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion)
 	} else {
-		k8s = false
 		if schemaPath == "" {
 			log.Fatalf("-schema must be set")
 		}
@@ -84,16 +80,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("fill schema: %v", err)
 	}
-	var document2 map[string]any
-	if k8s {
-		document2 = document.(map[string]any)
-		document2["kind"] = kind
-		document2["apiVersion"] = apiVersion
-		delete(document2, "status")
-	} else {
-		document2 = document.(map[string]any)
-	}
-	output, err := yaml.MarshalWithOptions(document2, yaml.IndentSequence(true))
+	output, err := yaml.MarshalWithOptions(document, yaml.IndentSequence(true))
 	if err != nil {
 		log.Fatalf("marshal document: %v", err)
 	}
