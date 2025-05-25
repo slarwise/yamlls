@@ -16,8 +16,6 @@ import (
 
 // TODO:
 //   - Update an existing document and using a path. E.g. I'm in the middle of writing the document and I just want to fill a specific field
-//   - Maybe always render the whole schema and then pick out the needed bit from the path. That makes it easier to always set kind and
-//     apiVersion and remove status
 func main() {
 	log.SetFlags(0)
 	var schemaPath, path, kind, apiVersion string
@@ -34,62 +32,62 @@ func main() {
 		os.Exit(0)
 	}
 
+	k8s := true
 	var jsonSchema map[string]any
-	if kind != "" && apiVersion == "" {
-		apiVersions := schemas.GetApiVersions(kind)
-		if len(apiVersions) == 0 {
-			log.Fatalf("no apiVersions found for kind `%s`", kind)
-		} else if len(apiVersions) == 1 {
-			apiVersion = apiVersions[0]
-			jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion)
-		} else {
-			var choice int
-			for {
-				log.Println("Pick one:")
-				for i, apiVersion := range apiVersions {
-					log.Printf("%d: %s", i, apiVersion)
-				}
-				_, err := fmt.Scanln(&choice)
-				if err != nil {
-					log.Print("try again")
-					continue
-				}
-				if choice >= len(apiVersions) {
-					log.Print("too big")
-				} else {
-					break
-				}
-			}
-			apiVersion = apiVersions[choice]
-			jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion)
-		}
-	} else if kind != "" || apiVersion != "" {
-		if kind == "" || apiVersion == "" {
-			log.Fatalf("both -kind and -apiVersion must be set")
-		}
-		jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion)
-	} else {
+	if kind == "" && apiVersion == "" {
 		if schemaPath == "" {
 			log.Fatalf("-schema must be set")
 		}
 		jsonSchema = mustLoadJsonSchema(schemaPath)
+		k8s = false
+	} else if kind != "" {
+		if apiVersion == "" {
+			apiVersions := schemas.GetApiVersions(kind)
+			if len(apiVersions) == 0 {
+				log.Fatalf("no apiVersions found for kind `%s`", kind)
+			} else if len(apiVersions) == 1 {
+				apiVersion = apiVersions[0]
+				jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion)
+			} else {
+				var choice int
+				for {
+					log.Println("Pick one:")
+					for i, apiVersion := range apiVersions {
+						log.Printf("%d: %s", i, apiVersion)
+					}
+					_, err := fmt.Scanln(&choice)
+					if err != nil {
+						log.Print("try again")
+						continue
+					}
+					if choice >= len(apiVersions) {
+						log.Print("too big")
+					} else {
+						break
+					}
+				}
+				apiVersion = apiVersions[choice]
+				jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion)
+			}
+		} else {
+			jsonSchema = mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion)
+		}
+	} else if apiVersion != "" {
+		log.Fatalf("must set -kind if setting -apiVersion")
 	}
 	document, err := schemas.FillFromSchema(jsonSchema)
-	if path != "" {
-		res := gjson.GetBytes(mustMarshalJson(document), path)
-		if !res.Exists() {
-			log.Fatalf("path `%s` not found", path)
-		}
-		document = res.Value()
-	}
 	if err != nil {
-		log.Fatalf("fill schema: %v", err)
+		log.Fatalf("fill from schema: %v", err)
 	}
-	output, err := yaml.MarshalWithOptions(document, yaml.IndentSequence(true))
-	if err != nil {
-		log.Fatalf("marshal document: %v", err)
+	if k8s {
+		k8sDocument := document.(map[string]any)
+		k8sDocument["kind"] = kind
+		k8sDocument["apiVersion"] = apiVersion
+		delete(k8sDocument, "status")
+		mustPrint(mustGetPath(k8sDocument, path))
+	} else {
+		mustPrint(mustGetPath(document, path))
 	}
-	fmt.Printf("%s", output)
 }
 
 func mustMarshalJson(data any) []byte {
@@ -116,10 +114,28 @@ func mustLoadJsonSchema(schemaPath string) map[string]any {
 }
 
 func mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion string) map[string]any {
-	// TODO: Support CRDs
 	url, err := schemas.GetKubernetesSchemaUrl(kind, apiVersion)
 	if err != nil {
 		log.Fatalf("get url for kind `%s` and apiVersion `%s`: %v", kind, apiVersion, err)
 	}
 	return mustLoadJsonSchema(url)
+}
+
+func mustGetPath(document any, path string) any {
+	if path == "" {
+		return document
+	}
+	res := gjson.GetBytes(mustMarshalJson(document), path)
+	if !res.Exists() {
+		log.Fatalf("path `%s` not found", path)
+	}
+	return res.Value()
+}
+
+func mustPrint(document any) {
+	output, err := yaml.MarshalWithOptions(document, yaml.IndentSequence(true))
+	if err != nil {
+		log.Fatalf("marshal document: %v", err)
+	}
+	fmt.Printf("%s", output)
 }
