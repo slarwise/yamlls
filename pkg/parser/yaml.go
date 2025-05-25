@@ -12,6 +12,8 @@ type Position struct {
 	Line, StartCol, EndCol int
 }
 
+type PathToPosition map[string]Position
+
 func PathsToPositions(document []byte) (PathToPosition, error) {
 	astFile, err := yamlparser.ParseBytes(document, 0)
 	if err != nil {
@@ -24,8 +26,6 @@ func PathsToPositions(document []byte) (PathToPosition, error) {
 	ast.Walk(&capturer, astFile.Docs[0])
 	return capturer, nil
 }
-
-type PathToPosition map[string]Position
 
 func (c PathToPosition) Visit(node ast.Node) ast.Visitor {
 	if node.Type() == ast.MappingValueType || node.Type() == ast.MappingType || node.Type() == ast.DocumentType {
@@ -45,4 +45,17 @@ func (c PathToPosition) Visit(node ast.Node) ast.Visitor {
 		EndCol:   t.Position.Column + len(t.Value),
 	}
 	return c
+}
+
+func PathAtPosition(document []byte, line, col int) (string, error) {
+	paths, err := PathsToPositions(document)
+	if err != nil {
+		return "", fmt.Errorf("compute yaml paths to positions: %v", err)
+	}
+	for path, pos := range paths {
+		if pos.Line == line && pos.StartCol <= col && col < pos.EndCol {
+			return path, nil
+		}
+	}
+	return "", nil
 }
