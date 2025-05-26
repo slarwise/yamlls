@@ -1,6 +1,8 @@
 package parser
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestPathsToPositions(t *testing.T) {
 	doc := []byte(`name: arvid
@@ -75,4 +77,20 @@ cat:
 			}
 		})
 	}
+}
+
+func TestUpdateDocument(t *testing.T) {
+	doc := []byte(`
+kind: Server
+apiVersion: 1996
+# hello
+uptime: 69
+`)
+	path := "uptime"
+	replacement := []byte("70")
+	updated, err := ReplaceNode(doc, path, replacement)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	t.Log(updated)
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	yamlparser "github.com/goccy/go-yaml/parser"
 )
@@ -58,4 +59,27 @@ func PathAtPosition(document []byte, line, col int) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// https://github.com/goccy/go-yaml/issues/574#issuecomment-2524814434
+func ReplaceNode(document []byte, path string, replacement []byte) (string, error) {
+	file, err := yamlparser.ParseBytes([]byte(document), yamlparser.ParseComments)
+	if err != nil {
+		return "", fmt.Errorf("%+v", err)
+	}
+	node, err := yamlparser.ParseBytes([]byte(replacement), 0)
+	if err != nil {
+		return "", fmt.Errorf("%+v", err)
+	}
+	if len(node.Docs) == 0 {
+		return "", fmt.Errorf("failed to parse replacement")
+	}
+	path_, err := yaml.PathString("$." + path)
+	if err != nil {
+		return "", fmt.Errorf("create path: %v", err)
+	}
+	if err := path_.ReplaceWithNode(file, node.Docs[0]); err != nil {
+		return "", fmt.Errorf("%+v", err)
+	}
+	return file.String(), nil
 }
