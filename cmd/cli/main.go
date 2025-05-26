@@ -16,6 +16,7 @@ import (
 
 // TODO:
 //   - Update an existing document and using a path. E.g. I'm in the middle of writing the document and I just want to fill a specific field
+//   - When verifying a kustomization.yaml file, ensure that no resources of the same kind have the same name
 func main() {
 	log.SetFlags(0)
 	var schemaPath, path, kind, apiVersion string
