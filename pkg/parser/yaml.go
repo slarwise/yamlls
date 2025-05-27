@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -28,11 +29,15 @@ func PathsToPositions(document []byte) (PathToPosition, error) {
 	return capturer, nil
 }
 
+var arrayPattern = regexp.MustCompile(`\[(\d+)\]`)
+
 func (c PathToPosition) Visit(node ast.Node) ast.Visitor {
 	if node.Type() == ast.MappingValueType || node.Type() == ast.MappingType || node.Type() == ast.DocumentType {
 		return c
 	}
 	path := strings.TrimPrefix(node.GetPath(), "$.")
+	// Turn spec.ports[0].port into spec.ports.0.port
+	path = arrayPattern.ReplaceAllString(path, ".$1")
 	if _, found := c[path]; found {
 		// Store the path to the key only, not the value
 		// Assumes that the key is always visited first, couldn't find a way to distinguish

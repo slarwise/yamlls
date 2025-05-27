@@ -14,5 +14,5 @@ metadata:
   name: hej
 spec:
   ports:
-    - port: 123
-      name: "hej"
+    - port: 8080
+      name: asdf

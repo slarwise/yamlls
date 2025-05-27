@@ -2,6 +2,7 @@ package schemas
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/goccy/go-yaml"
 	"github.com/slarwise/yamlls/pkg/parser"
@@ -46,6 +47,8 @@ type YamlError struct {
 
 // TODO: Handle arrays
 // "validate against schema","err":"could not find position for error at `spec.ports.0`"
+var trailingIndex = regexp.MustCompile(`\.\d+$`)
+
 func ValidateYaml(schema map[string]any, document []byte) ([]YamlError, error) {
 	bytes, err := yaml.YAMLToJSON(document)
 	if err != nil {
@@ -74,6 +77,9 @@ func ValidateYaml(schema map[string]any, document []byte) ([]YamlError, error) {
 					field = field + "." + property.(string)
 				}
 			}
+			// Turn spec.ports.0 into spec.ports, needed for arrays with required properties
+			field = trailingIndex.ReplaceAllString(field, "")
+
 			var found bool
 			pos, found = pathToPosition[field]
 			if !found {
