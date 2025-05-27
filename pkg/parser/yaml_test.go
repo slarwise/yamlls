@@ -94,3 +94,63 @@ uptime: 69
 	}
 	t.Log(updated)
 }
+
+func TestGetKindAndApiVersion(t *testing.T) {
+	tests := map[string]struct {
+		doc              []byte
+		kind, apiVersion string
+		err              bool
+	}{
+		"both-kind-and-apiVersion": {
+			doc: []byte(`
+kind: Server
+apiVersion: 1990
+		`),
+			kind:       "Server",
+			apiVersion: "1990",
+			err:        false,
+		},
+		"kind-only": {
+			doc: []byte(`
+kind: Server
+		`),
+			kind:       "Server",
+			apiVersion: "",
+			err:        false,
+		},
+		"apiVersion-only": {
+			doc: []byte(`
+apiVersion: 1990
+		`),
+			kind:       "",
+			apiVersion: "1990",
+			err:        false,
+		},
+		"invalid-yaml": {
+			doc: []byte(`
+kind
+apiVersion
+`),
+			kind:       "",
+			apiVersion: "",
+			err:        true,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			kind, apiVersion, err := GetKindAndApiVersion(test.doc)
+			if kind != test.kind {
+				t.Fatalf("expected kind to be `%s`, got `%s`", test.kind, kind)
+			}
+			if apiVersion != test.apiVersion {
+				t.Fatalf("expected apiVersion to be `%s`, got `%s`", test.apiVersion, apiVersion)
+			}
+			if test.err && err == nil {
+				t.Fatalf("expected an error, got nil")
+			}
+			if !test.err && err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+		})
+	}
+}

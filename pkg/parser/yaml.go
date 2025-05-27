@@ -83,3 +83,16 @@ func ReplaceNode(document []byte, path string, replacement []byte) (string, erro
 	}
 	return file.String(), nil
 }
+
+type kindAndApiVersion struct {
+	Kind       string `yaml:"kind"`
+	ApiVersion string `yaml:"apiVersion"`
+}
+
+func GetKindAndApiVersion(document []byte) (string, string, error) {
+	var result kindAndApiVersion
+	if err := yaml.Unmarshal(document, &result); err != nil {
+		return "", "", fmt.Errorf("invalid yaml: %v", err)
+	}
+	return result.Kind, result.ApiVersion, nil
+}
