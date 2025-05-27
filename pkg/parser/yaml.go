@@ -10,7 +10,7 @@ import (
 )
 
 type Position struct {
-	Line, StartCol, EndCol int
+	Line, StartCol, EndCol int // 0-based
 }
 
 type PathToPosition map[string]Position
@@ -41,9 +41,9 @@ func (c PathToPosition) Visit(node ast.Node) ast.Visitor {
 	}
 	t := node.GetToken()
 	c[path] = Position{
-		Line:     t.Position.Line,
-		StartCol: t.Position.Column,
-		EndCol:   t.Position.Column + len(t.Value),
+		Line:     t.Position.Line - 1,
+		StartCol: t.Position.Column - 1,
+		EndCol:   t.Position.Column + len(t.Value) - 1,
 	}
 	return c
 }
@@ -95,4 +95,17 @@ func GetKindAndApiVersion(document []byte) (string, string, error) {
 		return "", "", fmt.Errorf("invalid yaml: %v", err)
 	}
 	return result.Kind, result.ApiVersion, nil
+}
+
+func DocumentIsValid(document []byte) bool {
+	var result any
+	err := yaml.Unmarshal(document, &result)
+	return err == nil
+}
+
+func SplitIntoDocuments(text string) []string {
+	text = strings.TrimPrefix(text, "---\n")
+	text = strings.TrimSuffix(text, "---\n")
+	text = strings.TrimSuffix(text, "---")
+	return strings.Split(text, "---\n")
 }

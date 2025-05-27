@@ -43,3 +43,39 @@ status: chillin'`)
 		t.Log(e)
 	}
 }
+
+var schema2 = map[string]any{
+	"$schema":  "https://json-schema.org/draft/2020-12/schema",
+	"type":     "object",
+	"required": []string{"spec"},
+	"properties": map[string]any{
+		"spec": map[string]any{
+			"type":                 "object",
+			"required":             []string{"project"},
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"project": map[string]any{
+					"type": "string",
+				},
+			},
+		},
+	},
+}
+
+func TestValidateYaml2(t *testing.T) {
+	doc := []byte(`
+spec:
+  destination:
+    name: ""
+    namespace: ""
+    server: ""
+  project: ""
+`)
+	errors, err := ValidateYaml(schema2, doc)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, e := range errors {
+		t.Log(e)
+	}
+}

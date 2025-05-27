@@ -10,13 +10,13 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-func GetKubernetesSchemaUrl(kind, apiVersion string) (string, error) {
+func GetKubernetesSchemaUrl(kind, apiVersion string) (string, bool) {
 	key := buildKey(kind, apiVersion)
 	url, found := db[key]
 	if !found {
-		return "", fmt.Errorf("not found")
+		return "", false
 	}
-	return url, nil
+	return url, true
 }
 
 func GetApiVersions(kind string) []string {

@@ -5,33 +5,65 @@ import (
 )
 
 func TestPathsToPositions(t *testing.T) {
-	doc := []byte(`name: arvid
+	tests := map[string]struct {
+		doc      []byte
+		expected map[string]Position
+	}{
+		"simple": {
+			doc: []byte(`name: arvid
 status: chillin'
 cat:
   name: strimma
-  nice: true`)
-	result, err := PathsToPositions(doc)
-	if err != nil {
-		t.Logf("unexpected error: %v", err)
+  nice: true`),
+			expected: map[string]Position{
+				"name":     {0, 0, 4},
+				"status":   {1, 0, 6},
+				"cat":      {2, 0, 3},
+				"cat.name": {3, 2, 6},
+				"cat.nice": {4, 2, 6},
+			},
+		},
+		"argocd-app": {
+			doc: []byte(`kind: Application
+spec:
+  destination:
+    name: ""
+    namespace: ""
+    server: ""
+  project: ""
+`),
+			expected: map[string]Position{
+				"kind":                       {0, 0, 4},
+				"spec":                       {1, 0, 4},
+				"spec.destination":           {2, 2, 13},
+				"spec.destination.name":      {3, 4, 8},
+				"spec.destination.namespace": {4, 4, 13},
+				"spec.destination.server":    {5, 4, 10},
+				"spec.project":               {6, 2, 9},
+			},
+		},
 	}
-	expected := map[string]Position{
-		"name":     {1, 1, 5},
-		"status":   {2, 1, 7},
-		"cat":      {3, 1, 4},
-		"cat.name": {4, 3, 7},
-		"cat.nice": {5, 3, 7},
-	}
-	if len(result) != len(expected) {
-		t.Fatalf("expected %d paths, got %d", len(expected), len(result))
-	}
-	for path, position := range expected {
-		actualPosition, found := result[path]
-		if !found {
-			t.Fatalf("expected path `%s` to exist", path)
-		}
-		if position != actualPosition {
-			t.Fatalf("expected position for path `%s` to be %v, got %v", path, position, actualPosition)
-		}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			result, err := PathsToPositions(test.doc)
+			t.Log(result)
+			if err != nil {
+				t.Logf("unexpected error: %v", err)
+			}
+			if len(result) != len(test.expected) {
+				t.Fatalf("expected %d paths, got %d", len(test.expected), len(result))
+			}
+			for path, position := range test.expected {
+				actualPosition, found := result[path]
+				if !found {
+					t.Fatalf("expected path `%s` to exist", path)
+				}
+				if position != actualPosition {
+					t.Fatalf("expected position for path `%s` to be %v, got %v", path, position, actualPosition)
+				}
+			}
+
+		})
 	}
 }
 
@@ -46,23 +78,23 @@ cat:
 		expected  string
 	}{
 		"left": {
-			line:     1,
-			col:      1,
+			line:     0,
+			col:      0,
 			expected: "name",
 		},
 		"right": {
-			line:     1,
-			col:      4,
+			line:     0,
+			col:      3,
 			expected: "name",
 		},
 		"bottom": {
-			line:     5,
-			col:      6,
+			line:     4,
+			col:      5,
 			expected: "cat.nice",
 		},
 		"out-of-range": {
-			line:     6,
-			col:      1,
+			line:     5,
+			col:      0,
 			expected: "",
 		},
 	}

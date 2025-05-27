@@ -7,3 +7,11 @@ spec:
     namespace: ""
     server: ""
   project: ""
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: hej
+spec:
+  ports:
+    - port: 123

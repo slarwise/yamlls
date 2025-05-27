@@ -59,9 +59,18 @@ func ValidateYaml(schema map[string]any, document []byte) ([]YamlError, error) {
 	}
 	var yamlErrors []YamlError
 	for _, e := range errors {
-		pos, found := pathToPosition[e.Field()]
-		if !found {
-			return nil, fmt.Errorf("could not find position for error at `%s`", e.Field())
+		field := e.Field()
+		var pos parser.Position
+		if field == "(root)" {
+			pos.Line = 0
+			pos.StartCol = 0
+			pos.EndCol = 0
+		} else {
+			var found bool
+			pos, found = pathToPosition[field]
+			if !found {
+				return nil, fmt.Errorf("could not find position for error at `%s`", field)
+			}
 		}
 		yamlErrors = append(yamlErrors, YamlError{
 			Line:        pos.Line,
