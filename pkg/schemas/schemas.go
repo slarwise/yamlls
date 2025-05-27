@@ -44,6 +44,8 @@ type YamlError struct {
 	Type                   string
 }
 
+// TODO: Handle arrays
+// "validate against schema","err":"could not find position for error at `spec.ports.0`"
 func ValidateYaml(schema map[string]any, document []byte) ([]YamlError, error) {
 	bytes, err := yaml.YAMLToJSON(document)
 	if err != nil {
@@ -66,6 +68,12 @@ func ValidateYaml(schema map[string]any, document []byte) ([]YamlError, error) {
 			pos.StartCol = 0
 			pos.EndCol = 0
 		} else {
+			if e.Type() == "additional_property_not_allowed" {
+				property, hasProperty := e.Details()["property"]
+				if hasProperty {
+					field = field + "." + property.(string)
+				}
+			}
 			var found bool
 			pos, found = pathToPosition[field]
 			if !found {
