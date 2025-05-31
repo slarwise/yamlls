@@ -67,9 +67,9 @@ func main() {
 		}
 		logger.Info("Received initialize request", "params", initializeParams)
 		switch v := initializeParams.InitializationOptions.(type) {
-		case map[string]interface{}:
+		case map[string]any:
 			if overrides, found := v["filenameOverrides"]; found {
-				overrides, ok := overrides.(map[string]interface{})
+				overrides, ok := overrides.(map[string]any)
 				if !ok {
 					return nil, fmt.Errorf("filenameOverrides must be a an object with strings as keys and strings as values")
 				}
@@ -127,7 +127,10 @@ func main() {
 	go func() {
 		for doc := range documentUpdates {
 			filenameToContents[doc.URI.Filename()] = doc.Text
-			diagnostics := validateFile(doc.Text)
+			diagnostics, err := validateFile(doc.Text)
+			if err != nil {
+				logger.Error("validate file", "err", err)
+			}
 			m.Notify(protocol.MethodTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 				URI:         doc.URI,
 				Version:     uint32(doc.Version),
@@ -417,7 +420,7 @@ func main() {
 	os.Exit(1)
 }
 
-func validateFile(contents string) []protocol.Diagnostic {
+func validateFile(contents string) ([]protocol.Diagnostic, error) {
 	diagnostics := []protocol.Diagnostic{}
 	yamlDocs := parser.SplitIntoYamlDocuments(contents)
 	lineOffset := 0
@@ -426,7 +429,6 @@ func validateFile(contents string) []protocol.Diagnostic {
 		linesCount := len(lines)
 		startLine := lineOffset
 		endLine := startLine + linesCount - 1
-		logger.Info("lines", "startLine", startLine, "endLine", endLine)
 		lineOffset += linesCount + 1 // Account for the --- line between documents
 		if !parser2.DocumentIsValid([]byte(doc)) {
 			diagnostics = append(diagnostics, protocol.Diagnostic{
@@ -443,7 +445,7 @@ func validateFile(contents string) []protocol.Diagnostic {
 		// TODO: Support getting schema from filename
 		kind, apiVersion, err := parser2.GetKindAndApiVersion([]byte(doc))
 		if err != nil {
-			logger.Error("should not get an error from GetKindAndApiVersion with valid yaml", "err", err)
+			return nil, fmt.Errorf("should not get an error from GetKindAndApiVersion with valid yaml: %v", err)
 		}
 		var schemaUrl string
 		var found bool
@@ -495,5 +497,5 @@ func validateFile(contents string) []protocol.Diagnostic {
 			})
 		}
 	}
-	return diagnostics
+	return diagnostics, nil
 }
