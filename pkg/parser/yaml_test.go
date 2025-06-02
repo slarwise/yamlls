@@ -129,7 +129,7 @@ cat:
 	}
 }
 
-func TestUpdateDocument(t *testing.T) {
+func TestReplaceNode(t *testing.T) {
 	doc := []byte(`
 kind: Server
 apiVersion: 1996

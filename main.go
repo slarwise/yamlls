@@ -8,9 +8,11 @@ import (
 	"path"
 	"strings"
 
+	"github.com/goccy/go-yaml"
 	"github.com/slarwise/yamlls/internal/lsp"
 	"github.com/slarwise/yamlls/pkg/parser"
 	"github.com/slarwise/yamlls/pkg/schemas"
+	"github.com/tidwall/gjson"
 
 	"go.lsp.dev/protocol"
 )
@@ -143,9 +145,72 @@ func main() {
 
 	m.HandleMethod("textDocument/completion", func(rawParams json.RawMessage) (any, error) { panic("TODO: Support completion") })
 
-	m.HandleMethod(protocol.MethodTextDocumentCodeAction, func(rawParams json.RawMessage) (any, error) { panic("TODO: Support code actions") })
+	m.HandleMethod(protocol.MethodTextDocumentCodeAction, func(rawParams json.RawMessage) (any, error) {
+		logger.Info("Received textDocument/codeAction request")
+		var params protocol.CodeActionParams
+		if err := json.Unmarshal(rawParams, &params); err != nil {
+			return nil, err
+		}
+		contents := filenameToContents[params.TextDocument.URI.Filename()]
+		path, docIndex, err := getArgsToFillDocument(contents, int(params.Range.Start.Line), int(params.Range.Start.Character))
+		if err != nil {
+			return nil, err
+		}
+		response := []protocol.CodeAction{
+			{
+				Title: "Fill document",
+				Command: &protocol.Command{
+					Title:     "Fill document",
+					Command:   "fill-document",
+					Arguments: []any{params.TextDocument.URI, path, docIndex},
+				},
+			},
+		}
+		return response, nil
+	})
 
-	m.HandleMethod(protocol.MethodWorkspaceExecuteCommand, func(rawParams json.RawMessage) (any, error) { panic("TODO: Support execute command") })
+	m.HandleMethod(protocol.MethodWorkspaceExecuteCommand, func(rawParams json.RawMessage) (any, error) {
+		logger.Info("Received workspace/executeCommand request")
+		var params protocol.ExecuteCommandParams
+		if err := json.Unmarshal(rawParams, &params); err != nil {
+			return nil, err
+		}
+		switch params.Command {
+		case "fill-document":
+			uri := protocol.URI(params.Arguments[0].(string))
+			path := params.Arguments[1].(string)
+			docIndex := params.Arguments[2].(float64)
+			contents := filenameToContents[uri.Filename()]
+			logger.Info("fill-document", "contents", contents, "docIndex", docIndex, "path", path)
+			updatedDoc, err := fillDocument(contents, path, int(docIndex))
+			if err != nil {
+				return nil, err
+			}
+			applyParams := protocol.ApplyWorkspaceEditParams{
+				Edit: protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+						protocol.DocumentURI(uri): {
+							{
+								Range: protocol.Range{
+									Start: protocol.Position{
+										Line:      uint32(updatedDoc.StartLine),
+										Character: 0,
+									},
+									End: protocol.Position{
+										Line:      uint32(updatedDoc.EndLine) + 1, // it do be like that
+										Character: 0,
+									},
+								},
+								NewText: updatedDoc.Contents,
+							},
+						},
+					},
+				},
+			}
+			m.Request("workspace/applyEdit", applyParams)
+		}
+		return nil, nil
+	})
 
 	logger.Info("Handler set up", "log_path", logpath)
 
@@ -293,4 +358,93 @@ func getDescription(contents string, line, char int) (string, error) {
 		return "", fmt.Errorf("not found")
 	}
 	return description, nil
+}
+
+type updatedDoc struct {
+	Contents           string
+	StartLine, EndLine int
+}
+
+func fillDocument(contents, path string, docIndex int) (updatedDoc, error) {
+	var currentDoc string
+	lineOffset := 0
+	var startLine, endLine int
+	docs := parser.SplitIntoDocuments(contents)
+	for i, doc := range docs {
+		lines := strings.FieldsFunc(doc, func(r rune) bool { return r == '\n' })
+		linesCount := len(lines)
+		startLine = lineOffset
+		endLine = startLine + linesCount - 1
+		lineOffset += linesCount + 1 // Account for the --- line between documents
+		if i == docIndex {
+			currentDoc = doc
+			break
+		}
+	}
+	if currentDoc == "" {
+		return updatedDoc{}, fmt.Errorf("docIndex is greater than the number of documents in contents. Got %d, len(docs) is %d", docIndex, len(docs))
+	}
+	schema, found, err := getSchema(currentDoc)
+	if err != nil {
+		return updatedDoc{}, fmt.Errorf("get schema: %v", err)
+	}
+	if !found {
+		return updatedDoc{}, fmt.Errorf("no schema found")
+	}
+	filled, err := schemas.FillFromSchema(schema)
+	if err != nil {
+		return updatedDoc{}, fmt.Errorf("fill from schema: %v", err)
+	}
+	filledMarshalled, err := json.Marshal(filled)
+	if err != nil {
+		return updatedDoc{}, fmt.Errorf("marshal json: %v", err)
+	}
+	// TODO: Can you do yaml.Get and get yaml? So you don't need to marshal it to yaml again.
+	res := gjson.GetBytes(filledMarshalled, path)
+	if !res.Exists() {
+		return updatedDoc{}, fmt.Errorf("path `%s` not found", path)
+	}
+	yamlOutput, err := yaml.Marshal(res.Value())
+	if err != nil {
+		return updatedDoc{}, fmt.Errorf("marshal yaml: %v", err)
+	}
+	updatedDocument, err := parser.ReplaceNode([]byte(currentDoc), path, yamlOutput)
+	if err != nil {
+		return updatedDoc{}, fmt.Errorf("update document: %v", err)
+	}
+	return updatedDoc{
+		Contents:  updatedDocument,
+		StartLine: startLine,
+		EndLine:   endLine,
+	}, nil
+}
+
+func getArgsToFillDocument(contents string, line, char int) (string, int, error) {
+	lineOffset := 0
+	var currentDoc string
+	var lineInDoc, docIndex int
+	for i, doc := range parser.SplitIntoDocuments(contents) {
+		lines := strings.FieldsFunc(doc, func(r rune) bool { return r == '\n' })
+		linesCount := len(lines)
+		startLine := lineOffset
+		endLine := startLine + linesCount - 1
+		lineOffset += linesCount + 1 // Account for the --- line between documents
+		lineInDoc = line - startLine
+		if startLine <= line && line <= endLine {
+			currentDoc = doc
+			docIndex = i
+			break
+		}
+	}
+	if currentDoc == "" {
+		return "", 0, fmt.Errorf("get document: position is not inside a document, probably on `---`")
+	}
+	path, err := parser.PathAtPosition([]byte(currentDoc), lineInDoc, char)
+	if err != nil {
+		return "", 0, fmt.Errorf("get path at position: %v. doc: %s", err, currentDoc)
+	}
+	if path == "" {
+		return "", 0, fmt.Errorf("path not found. doc: %s. lineInDoc: %v. line: %v. char: %v.", currentDoc, lineInDoc, line, char)
+	}
+	return path, docIndex, nil
 }
