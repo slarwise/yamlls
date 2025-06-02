@@ -121,6 +121,7 @@ func main() {
 	})
 
 	m.HandleMethod("textDocument/hover", func(rawParams json.RawMessage) (any, error) {
+		logger.Info("Received textDocument/hover request")
 		var params protocol.HoverParams
 		if err := json.Unmarshal(rawParams, &params); err != nil {
 			return nil, err
@@ -128,7 +129,8 @@ func main() {
 		contents := filenameToContents[params.TextDocument.URI.Filename()]
 		description, err := getDescription(contents, int(params.Position.Line), int(params.Position.Character))
 		if err != nil {
-			return nil, fmt.Errorf("get description: %v", err)
+			logger.Error("failed to get description", "line", params.Position.Line, "char", params.Position.Character, "err", err)
+			return nil, nil
 		}
 
 		return protocol.Hover{
@@ -181,7 +183,6 @@ func validateFile(contents string) ([]protocol.Diagnostic, error) {
 			})
 			continue
 		}
-		// TODO: Support getting schema from filename
 		schema, found, err := getSchema(doc)
 		if err != nil {
 			return nil, fmt.Errorf("get schema: %v", err)
@@ -260,13 +261,14 @@ func getDescription(contents string, line, char int) (string, error) {
 		startLine := lineOffset
 		endLine := startLine + linesCount - 1
 		lineOffset += linesCount + 1 // Account for the --- line between documents
+		lineInDoc = line - startLine
 		if startLine <= line && line <= endLine {
 			currentDoc = doc
+			break
 		}
-		lineInDoc = line - startLine
 	}
 	if currentDoc == "" {
-		panic("could not find document from where hover was called")
+		return "", fmt.Errorf("get document: position is not inside a document, probably on `---`")
 	}
 	schema, found, err := getSchema(currentDoc)
 	if err != nil {
@@ -275,12 +277,12 @@ func getDescription(contents string, line, char int) (string, error) {
 	if !found {
 		return "", fmt.Errorf("not found")
 	}
-	path, err := parser.PathAtPosition([]byte(currentDoc), lineInDoc, int(char))
+	path, err := parser.PathAtPosition([]byte(currentDoc), lineInDoc, char)
 	if err != nil {
-		return "", fmt.Errorf("get path at position: %v", err)
+		return "", fmt.Errorf("get path at position: %v. doc: %s", err, currentDoc)
 	}
 	if path == "" {
-		return "", fmt.Errorf("path not found")
+		return "", fmt.Errorf("path not found. doc: %s. lineInDoc: %v. line: %v. char: %v.", currentDoc, lineInDoc, line, char)
 	}
 	bytes, err := json.Marshal(schema)
 	if err != nil {
