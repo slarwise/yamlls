@@ -52,20 +52,19 @@ spec:
     - port: 8080
 `),
 			expected: map[string]Position{
-				"kind":          {0, 0, 4},
-				"apiVersion":    {1, 0, 10},
-				"metadata":      {2, 2, 13},
-				"metadata.name": {3, 4, 8},
-				"spec":          {4, 4, 13},
-				"spec.ports":    {5, 4, 10},
-				"spec.ports.0":  {6, 2, 9},
+				"kind":              {0, 0, 4},
+				"apiVersion":        {1, 0, 10},
+				"metadata":          {2, 0, 8},
+				"metadata.name":     {3, 2, 6},
+				"spec":              {4, 0, 4},
+				"spec.ports":        {5, 2, 7},
+				"spec.ports.0.port": {6, 6, 10},
 			},
 		},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			result, err := PathsToPositions(test.doc)
-			t.Log(result)
 			if err != nil {
 				t.Logf("unexpected error: %v", err)
 			}

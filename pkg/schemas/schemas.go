@@ -3,9 +3,11 @@ package schemas
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/goccy/go-yaml"
 	"github.com/slarwise/yamlls/pkg/parser"
+	"github.com/tidwall/gjson"
 	"github.com/xeipuuv/gojsonschema"
 )
 
@@ -45,8 +47,6 @@ type YamlError struct {
 	Type                   string
 }
 
-// TODO: Handle arrays
-// "validate against schema","err":"could not find position for error at `spec.ports.0`"
 var trailingIndex = regexp.MustCompile(`\.\d+$`)
 
 func ValidateYaml(schema map[string]any, document []byte) ([]YamlError, error) {
@@ -95,4 +95,22 @@ func ValidateYaml(schema map[string]any, document []byte) ([]YamlError, error) {
 		})
 	}
 	return yamlErrors, nil
+}
+
+var indexPattern = regexp.MustCompile(`.properties.\d+\.`)
+
+// path examples:
+// - spec
+// - spec.ports
+// - spec.ports.3.name
+func GetDescription(schema []byte, path string) string {
+	path = strings.ReplaceAll(path, ".", ".properties.")
+	path = "properties." + path
+	path += ".description"
+	path = indexPattern.ReplaceAllString(path, ".items.")
+	res := gjson.GetBytes(schema, path)
+	if !res.Exists() {
+		return ""
+	}
+	return res.String()
 }

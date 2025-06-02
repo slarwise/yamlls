@@ -114,9 +114,9 @@ func mustLoadJsonSchema(schemaPath string) map[string]any {
 }
 
 func mustLoadJsonSchemaFromKindAndApiVersion(kind, apiVersion string) map[string]any {
-	url, err := schemas.GetKubernetesSchemaUrl(kind, apiVersion)
-	if err != nil {
-		log.Fatalf("get url for kind `%s` and apiVersion `%s`: %v", kind, apiVersion, err)
+	url, found := schemas.GetKubernetesSchemaUrl(kind, apiVersion)
+	if !found {
+		log.Fatalf("get url for kind `%s` and apiVersion `%s`: not found", kind, apiVersion)
 	}
 	return mustLoadJsonSchema(url)
 }

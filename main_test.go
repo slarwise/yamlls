@@ -113,5 +113,68 @@ spec:
 			}
 		})
 	}
+}
 
+func TestGetDescription(t *testing.T) {
+	tests := map[string]struct {
+		contents    string
+		line, char  int
+		description string
+	}{
+		"top-level": {
+			contents: `apiVersion: v1
+kind: Service
+spec: {}
+`,
+			line:        2,
+			char:        0,
+			description: "ServiceSpec describes the attributes that a user creates on a service.",
+		},
+		"second-level": {
+			contents: `apiVersion: v1
+kind: Service
+spec:
+  ports: {}
+`,
+			line:        3,
+			char:        2,
+			description: "The list of ports that are exposed by this service. More info: https://kubernetes.io/docs/concepts/services-networking/service/#virtual-ips-and-service-proxies",
+		},
+		"two-docs": {
+			contents: `apiVersion: v1
+kind: Service
+spec: {}
+---
+apiVersion: v1
+kind: Service
+spec:
+  ports: {}
+`,
+			line:        5,
+			char:        2,
+			description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+		},
+		"array": {
+			contents: `apiVersion: v1
+kind: Service
+spec:
+  ports:
+    - name: hej
+`,
+			line:        4,
+			char:        6,
+			description: "The list of ports that are exposed by this service. More info: https://kubernetes.io/docs/concepts/services-networking/service/#virtual-ips-and-service-proxies",
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			description, err := getDescription(test.contents, test.line, test.char)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if description != test.description {
+				t.Fatalf("expected `%s`, got `%s`", test.description, description)
+			}
+		})
+	}
 }
