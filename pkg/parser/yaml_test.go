@@ -130,14 +130,56 @@ cat:
 }
 
 func TestReplaceNode(t *testing.T) {
-	doc := []byte(`
-kind: Server
-apiVersion: 1996
-# hello
-uptime: 69
+	// 	doc := []byte(`
+	// kind: Server
+	// apiVersion: 1996
+	// # hello
+	// uptime: 69
+	// `)
+	// path := "uptime"
+	// replacement := []byte("70")
+	doc := []byte(`kind: Service
+apiVersion: v1
+metadata: {}
+spec: {}
 `)
-	path := "uptime"
-	replacement := []byte("70")
+	path := "spec"
+	replacement := []byte(`allocateLoadBalancerNodePorts: false
+clusterIP: ""
+clusterIPs:
+- ""
+externalIPs:
+- ""
+externalName: ""
+externalTrafficPolicy: ""
+healthCheckNodePort: 0
+internalTrafficPolicy: ""
+ipFamilies:
+- ""
+ipFamilyPolicy: ""
+loadBalancerClass: ""
+loadBalancerIP: ""
+loadBalancerSourceRanges:
+- ""
+ports:
+- appProtocol: ""
+  name: ""
+  nodePort: 0
+  port: 0
+  protocol: ""
+  targetPort: ""
+publishNotReadyAddresses: false
+selector: {}
+sessionAffinity: ""
+sessionAffinityConfig:
+clientIP:
+  timeoutSeconds: 0
+trafficDistribution: ""
+type: ""
+`)
+	// 	replacement = []byte(`alloca: false
+	// hej: du
+	// `)
 	updated, err := ReplaceNode(doc, path, replacement)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
