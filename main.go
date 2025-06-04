@@ -191,6 +191,9 @@ func main() {
 					Changes: map[protocol.DocumentURI][]protocol.TextEdit{
 						protocol.DocumentURI(uri): {
 							{
+								// Setting the range to the full document moves the cursor to
+								// to the start of the document. It would be better to only update
+								// the node that is being filled, the the cursor doesn't move.
 								Range: protocol.Range{
 									Start: protocol.Position{
 										Line:      uint32(updatedDoc.StartLine),
