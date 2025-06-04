@@ -5,12 +5,13 @@ import (
 )
 
 // Generate an example from a schema using zero values
-func FillFromSchema(schema map[string]any) (any, error) {
+func FillFromSchema(schema map[string]any, depth int) (any, error) {
+	depth = depth - 1
 	type_, found := schema["type"]
 	if found {
 		switch type_ := type_.(type) {
 		case string:
-			result, err := fillFromType(type_, schema)
+			result, err := fillFromType(type_, schema, depth)
 			if err != nil {
 				return nil, err
 			}
@@ -28,7 +29,7 @@ func FillFromSchema(schema map[string]any) (any, error) {
 			if singleType == "" {
 				return nil, fmt.Errorf("expected at least one type to be not null when type is an array, got %v", type_)
 			}
-			result, err := fillFromType(singleType, schema)
+			result, err := fillFromType(singleType, schema, depth)
 			if err != nil {
 				return nil, err
 			}
@@ -51,7 +52,7 @@ func FillFromSchema(schema map[string]any) (any, error) {
 	oneOf, found := schema["oneOf"]
 	if found {
 		first := oneOf.([]any)[0]
-		result, err := FillFromSchema(first.(map[string]any))
+		result, err := FillFromSchema(first.(map[string]any), depth)
 		if err != nil {
 			return nil, fmt.Errorf("parse oneOf: %v", err)
 		}
@@ -61,7 +62,7 @@ func FillFromSchema(schema map[string]any) (any, error) {
 	anyOf, found := schema["anyOf"]
 	if found {
 		first := anyOf.([]any)[0]
-		result, err := FillFromSchema(first.(map[string]any))
+		result, err := FillFromSchema(first.(map[string]any), depth)
 		if err != nil {
 			return nil, fmt.Errorf("parse anyOf: %v", err)
 		}
@@ -76,7 +77,7 @@ func FillFromSchema(schema map[string]any) (any, error) {
 	return nil, fmt.Errorf("expected schema to have type, enum, const, oneOf, anyOf, x-kubernetes-preserve-unknown-fields set, got %v", schema)
 
 }
-func fillFromType(type_ string, schema map[string]any) (any, error) {
+func fillFromType(type_ string, schema map[string]any, depth int) (any, error) {
 	switch type_ {
 	case "string":
 		return "", nil
@@ -88,8 +89,11 @@ func fillFromType(type_ string, schema map[string]any) (any, error) {
 			return map[string]any{}, nil
 		}
 		result := map[string]any{}
+		if depth == 0 {
+			return result, nil
+		}
 		for k, v := range properties.(map[string]any) {
-			subResult, err := FillFromSchema(v.(map[string]any))
+			subResult, err := FillFromSchema(v.(map[string]any), depth)
 			if err != nil {
 				return nil, err
 			}
@@ -103,7 +107,10 @@ func fillFromType(type_ string, schema map[string]any) (any, error) {
 		if !found {
 			return nil, fmt.Errorf("expected a schema of type array to have items")
 		}
-		subResult, err := FillFromSchema(items.(map[string]any))
+		if depth == 0 {
+			return []any{}, nil
+		}
+		subResult, err := FillFromSchema(items.(map[string]any), depth)
 		if err != nil {
 			return nil, err
 		}

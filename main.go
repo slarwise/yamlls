@@ -391,24 +391,24 @@ func fillDocument(contents, path string, docIndex int) (updatedDoc, error) {
 	if !found {
 		return updatedDoc{}, fmt.Errorf("no schema found")
 	}
-	filled, err := schemas.FillFromSchema(schema)
+	schemaPath := schemas.ToSchemaPath(path)
+	schemaJson, err := json.Marshal(schema)
+	if err != nil {
+		return updatedDoc{}, fmt.Errorf("marshal schema to json: %v", err)
+	}
+	subSchemaRes := gjson.GetBytes(schemaJson, schemaPath)
+	if !subSchemaRes.Exists() {
+		return updatedDoc{}, fmt.Errorf("couldn't get sub schema at path %s", schemaPath)
+	}
+	filled, err := schemas.FillFromSchema(subSchemaRes.Value().(map[string]any), 3)
 	if err != nil {
 		return updatedDoc{}, fmt.Errorf("fill from schema: %v", err)
 	}
-	filledMarshalled, err := json.Marshal(filled)
-	if err != nil {
-		return updatedDoc{}, fmt.Errorf("marshal json: %v", err)
-	}
-	// TODO: Can you do yaml.Get and get yaml? So you don't need to marshal it to yaml again.
-	res := gjson.GetBytes(filledMarshalled, path)
-	if !res.Exists() {
-		return updatedDoc{}, fmt.Errorf("path `%s` not found", path)
-	}
-	yamlOutput, err := yaml.Marshal(res.Value())
+	filledMarshalled, err := yaml.Marshal(filled)
 	if err != nil {
 		return updatedDoc{}, fmt.Errorf("marshal yaml: %v", err)
 	}
-	updatedDocument, err := parser.ReplaceNode2([]byte(currentDoc), path, yamlOutput)
+	updatedDocument, err := parser.ReplaceNode2([]byte(currentDoc), path, filledMarshalled)
 	if err != nil {
 		return updatedDoc{}, fmt.Errorf("update document: %v", err)
 	}

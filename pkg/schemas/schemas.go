@@ -114,3 +114,10 @@ func GetDescription(schema []byte, path string) string {
 	}
 	return res.String()
 }
+
+func ToSchemaPath(path string) string {
+	path = strings.ReplaceAll(path, ".", ".properties.")
+	path = "properties." + path
+	path = indexPattern.ReplaceAllString(path, ".items.")
+	return path
+}
