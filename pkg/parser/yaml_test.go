@@ -129,19 +129,76 @@ cat:
 	}
 }
 
-func TestReplaceNode(t *testing.T) {
-	// 	doc := []byte(`
-	// kind: Server
-	// apiVersion: 1996
-	// # hello
-	// uptime: 69
-	// `)
-	// path := "uptime"
-	// replacement := []byte("70")
+// func TestReplaceNode(t *testing.T) {
+// 	// 	doc := []byte(`
+// 	// kind: Server
+// 	// apiVersion: 1996
+// 	// # hello
+// 	// uptime: 69
+// 	// `)
+// 	// path := "uptime"
+// 	// replacement := []byte("70")
+// 	doc := []byte(`kind: Service
+// apiVersion: v1
+// metadata: {}
+// spec:
+//   a: 3
+// `)
+// 	path := "spec"
+// 	// 	replacement := []byte(`allocateLoadBalancerNodePorts: false
+// 	// clusterIP: ""
+// 	// clusterIPs:
+// 	// - ""
+// 	// externalIPs:
+// 	// - ""
+// 	// externalName: ""
+// 	// externalTrafficPolicy: ""
+// 	// healthCheckNodePort: 0
+// 	// internalTrafficPolicy: ""
+// 	// ipFamilies:
+// 	// - ""
+// 	// ipFamilyPolicy: ""
+// 	// loadBalancerClass: ""
+// 	// loadBalancerIP: ""
+// 	// loadBalancerSourceRanges:
+// 	// - ""
+// 	// ports:
+// 	// - appProtocol: ""
+// 	//   name: ""
+// 	//   nodePort: 0
+// 	//   port: 0
+// 	//   protocol: ""
+// 	//   targetPort: ""
+// 	// publishNotReadyAddresses: false
+// 	// selector: {}
+// 	// sessionAffinity: ""
+// 	// sessionAffinityConfig:
+// 	// clientIP:
+// 	//   timeoutSeconds: 0
+// 	// trafficDistribution: ""
+// 	// type: ""
+// 	// `)
+// 	replacement := `abaa: 3`
+// 	// hej: du
+// 	// `)
+// 	updated, err := ReplaceNode(doc, path, []byte(replacement))
+// 	if err != nil {
+// 		t.Fatalf("unexpected error: %v", err)
+// 	}
+// 	var res map[string]any
+// 	if err := yaml.Unmarshal([]byte(updated), &res); err != nil {
+// 		panic(err)
+// 	}
+// 	t.Log(updated)
+// 	t.Log(res)
+// }
+
+func TestReplaceNode2(t *testing.T) {
 	doc := []byte(`kind: Service
 apiVersion: v1
 metadata: {}
-spec: {}
+spec:
+  a: 3
 `)
 	path := "spec"
 	replacement := []byte(`allocateLoadBalancerNodePorts: false
@@ -177,10 +234,7 @@ clientIP:
 trafficDistribution: ""
 type: ""
 `)
-	// 	replacement = []byte(`alloca: false
-	// hej: du
-	// `)
-	updated, err := ReplaceNode(doc, path, replacement)
+	updated, err := ReplaceNode2(doc, path, []byte(replacement))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -197,7 +251,7 @@ func TestGetKindAndApiVersion(t *testing.T) {
 			doc: []byte(`
 kind: Server
 apiVersion: 1990
-		`),
+`),
 			kind:       "Server",
 			apiVersion: "1990",
 			err:        false,
@@ -205,7 +259,7 @@ apiVersion: 1990
 		"kind-only": {
 			doc: []byte(`
 kind: Server
-		`),
+`),
 			kind:       "Server",
 			apiVersion: "",
 			err:        false,
@@ -213,7 +267,7 @@ kind: Server
 		"apiVersion-only": {
 			doc: []byte(`
 apiVersion: 1990
-		`),
+`),
 			kind:       "",
 			apiVersion: "1990",
 			err:        false,

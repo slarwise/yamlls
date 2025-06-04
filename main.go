@@ -408,7 +408,7 @@ func fillDocument(contents, path string, docIndex int) (updatedDoc, error) {
 	if err != nil {
 		return updatedDoc{}, fmt.Errorf("marshal yaml: %v", err)
 	}
-	updatedDocument, err := parser.ReplaceNode([]byte(currentDoc), path, yamlOutput)
+	updatedDocument, err := parser.ReplaceNode2([]byte(currentDoc), path, yamlOutput)
 	if err != nil {
 		return updatedDoc{}, fmt.Errorf("update document: %v", err)
 	}

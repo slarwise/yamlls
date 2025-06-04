@@ -8,6 +8,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	yamlparser "github.com/goccy/go-yaml/parser"
+	"github.com/tidwall/sjson"
 )
 
 type Position struct {
@@ -67,6 +68,7 @@ func PathAtPosition(document []byte, line, col int) (string, error) {
 }
 
 // https://github.com/goccy/go-yaml/issues/574#issuecomment-2524814434
+// TODO: This panics on file.String() due to a negative count in strings.Repeat in go-yaml/ast
 func ReplaceNode(document []byte, path string, replacement []byte) (string, error) {
 	file, err := yamlparser.ParseBytes([]byte(document), yamlparser.ParseComments)
 	if err != nil {
@@ -87,6 +89,27 @@ func ReplaceNode(document []byte, path string, replacement []byte) (string, erro
 		return "", fmt.Errorf("%+v", err)
 	}
 	return file.String(), nil
+}
+
+// This doesn't preserve comments and has no indentation for lists
+func ReplaceNode2(document []byte, path string, replacement []byte) (string, error) {
+	dst, err := yaml.YAMLToJSON(document)
+	if err != nil {
+		return "", fmt.Errorf("convert document to json: %v", err)
+	}
+	src, err := yaml.YAMLToJSON(replacement)
+	if err != nil {
+		return "", fmt.Errorf("convert replacement to json: %v", err)
+	}
+	resJson, err := sjson.SetRawBytes(dst, path, src)
+	if err != nil {
+		return "", fmt.Errorf("update path: %v", err)
+	}
+	res, err := yaml.JSONToYAML(resJson)
+	if err != nil {
+		return "", fmt.Errorf("convert to yaml: %v", err)
+	}
+	return string(res), nil
 }
 
 type kindAndApiVersion struct {

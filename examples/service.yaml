@@ -4,7 +4,7 @@ metadata:
   name: hej
 spec:
   destination:
-    name: "hej"
+    name: ""
     namespace: ""
     server: ""
   project: ""
