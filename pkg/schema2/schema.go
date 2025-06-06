@@ -120,7 +120,7 @@ func NewYamlDocument(contents string) (yamlDocument, bool) {
 	return yamlDocument(contents), true
 }
 
-func (d yamlDocument) Paths() map[string]Position {
+func (d yamlDocument) Paths() Paths {
 	astFile, err := yamlparser.ParseBytes([]byte(d), 0)
 	if err != nil {
 		panic(fmt.Sprintf("expected a valid yaml document: %v", err))
@@ -158,6 +158,15 @@ func (p Paths) Visit(node ast.Node) ast.Visitor {
 		CharEnd:   t.Position.Column + len(t.Value) - 1,
 	}
 	return p
+}
+
+func (p Paths) AtCursor(line, char int) (string, bool) {
+	for path, pos := range p {
+		if pos.LineStart == line && pos.CharStart <= char && char < pos.CharEnd {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 // ------------
