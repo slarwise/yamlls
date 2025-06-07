@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "kind": {
+      "const": "Service",
+      "description": "The service kind"
+    }
+  }
+}

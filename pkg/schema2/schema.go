@@ -212,13 +212,14 @@ type Property struct{ Path, Description, Type string }
 // - allOf: Combine into one schema
 // - not: Probably not support for docs
 // schema identifiers:
-// - type: string
-// - type: array of strings
-// - const
-// - enum
-// - x-kubernetes-preserve-unknown-fields
-// - oneOf
-// - anyOf
+// - [x] type: string
+// - [ ] type: array of strings
+// - [x] const
+// - [x] enum
+// - [ ] x-kubernetes-preserve-unknown-fields
+// - [x] oneOf
+// - [x] anyOf
+// - [ ] allOf
 
 // Use ?<number> when there are multiple schemas to choose from as in anyOf and oneOf
 //
@@ -233,12 +234,13 @@ type Property struct{ Path, Description, Type string }
 
 func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 	var docs SchemaDocs
+	var desc string
+	if d, found := schema["description"]; found {
+		desc = d.(string)
+	}
+
 	type_, found := schema["type"]
 	if found {
-		var desc string
-		if d, found := schema["description"]; found {
-			desc = d.(string)
-		}
 		var resolvedType string
 		tString, ok := type_.(string)
 		if ok {
@@ -306,31 +308,53 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 		return docs
 	}
 
-	var choices []any
-	if oneOf_, found := schema["oneOf"]; found {
-		oneOf, ok := oneOf_.([]any)
-		if !ok {
-			panic(fmt.Sprintf("expected oneOf to be []any, got %T", oneOf_))
-		}
-		choices = oneOf
-	} else if anyOf_, found := schema["anyOf"]; found {
-		anyOf, ok := anyOf_.([]any)
-		if !ok {
-			panic(fmt.Sprintf("expected anyOf to be []any, got %T", anyOf_))
-		}
-		choices = anyOf
-	}
-	if choices != nil {
-		for i, choice_ := range choices {
-			choice, ok := choice_.(map[string]any)
+	for _, choiceType := range []string{"oneOf", "anyOf"} {
+		if choices_, found := schema[choiceType]; found {
+			choices, ok := choices_.([]any)
 			if !ok {
-				panic(fmt.Sprintf("expected an anyOf or oneOf element to be map[string]any, got %T", choice_))
+				panic(fmt.Sprintf("expected oneOf to be []any, got %T", choices_))
 			}
-			docs = append(docs, walkSchemaDocs(fmt.Sprintf("%s?%d", path, i), choice)...)
+			if path != "" {
+				docs = append(docs, Property{
+					Path:        path,
+					Description: desc,
+					Type:        choiceType,
+				})
+			}
+			for i, choice_ := range choices {
+				choice, ok := choice_.(map[string]any)
+				if !ok {
+					panic(fmt.Sprintf("expected an anyOf or oneOf element to be map[string]any, got %T", choice_))
+				}
+				docs = append(docs, walkSchemaDocs(fmt.Sprintf("%s?%d", path, i), choice)...)
+			}
+			return docs
+		}
+	}
+
+	if _, found := schema["const"]; found {
+		if path != "" {
+			docs = append(docs, Property{
+				Path:        path,
+				Description: desc,
+				Type:        "const",
+			})
 		}
 		return docs
 	}
-	panic("not supported")
+
+	if _, found := schema["enum"]; found {
+		if path != "" {
+			docs = append(docs, Property{
+				Path:        path,
+				Description: desc,
+				Type:        "enum",
+			})
+		}
+		return docs
+	}
+
+	panic(fmt.Sprintf("schema not supported %v", schema))
 }
 
 type JsonValidationError struct{ Field, Message, Type string }

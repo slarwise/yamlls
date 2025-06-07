@@ -1,6 +1,7 @@
 package schema2
 
 import (
+	_ "embed"
 	"testing"
 
 	"github.com/xeipuuv/gojsonschema"
@@ -200,6 +201,18 @@ func TestSchemaValidate(t *testing.T) {
 	}
 }
 
+//go:embed testdata/oneOf.json
+var oneOf string
+
+//go:embed testdata/anyOf.json
+var anyOf string
+
+//go:embed testdata/const.json
+var const_ string
+
+//go:embed testdata/enum.json
+var enum string
+
 func TestSchemaDocs(t *testing.T) {
 	tests := map[string]struct {
 		schema string
@@ -261,9 +274,67 @@ func TestSchemaDocs(t *testing.T) {
 				},
 			},
 		},
+		"oneOf": {
+			schema: oneOf,
+			docs: SchemaDocs{
+				{
+					Path:        "port",
+					Description: "The port of the service",
+					Type:        "oneOf",
+				},
+				{
+					Path:        "port?0",
+					Description: "The port name",
+					Type:        "string",
+				},
+				{
+					Path:        "port?1",
+					Description: "The port number",
+					Type:        "integer",
+				},
+			},
+		},
+		"anyOf": {
+			schema: anyOf,
+			docs: SchemaDocs{
+				{
+					Path:        "port",
+					Description: "The port of the service",
+					Type:        "anyOf",
+				},
+				{
+					Path:        "port?0",
+					Description: "The port name",
+					Type:        "string",
+				},
+				{
+					Path:        "port?1",
+					Description: "The port number",
+					Type:        "integer",
+				},
+			},
+		},
+		"const": {
+			schema: const_,
+			docs: SchemaDocs{
+				{
+					Path:        "kind",
+					Description: "The service kind",
+					Type:        "const",
+				},
+			},
+		},
+		"enum": {
+			schema: enum,
+			docs: SchemaDocs{
+				{
+					Path:        "level",
+					Description: "The log level",
+					Type:        "enum",
+				},
+			},
+		},
 	}
-	// tonyz:
-	//   - producerIsHuman: true
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			s := Schema{loader: gojsonschema.NewStringLoader(test.schema)}

@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "port": {
+      "oneOf": [
+        { "type": "string", "description": "The port name" },
+        { "type": "integer", "description": "The port number" }
+      ],
+      "description": "The port of the service"
+    }
+  }
+}
