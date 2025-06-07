@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "port": {
+      "type": ["string", "integer"],
+      "description": "The port of the service"
+    }
+  }
+}

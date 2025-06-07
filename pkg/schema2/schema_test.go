@@ -216,6 +216,9 @@ var enum string
 //go:embed testdata/x-kubernetes-preserve-unknown-fields.json
 var xKubernetesPreserveUnknownFields string
 
+//go:embed testdata/types.json
+var types string
+
 func TestSchemaDocs(t *testing.T) {
 	tests := map[string]struct {
 		schema string
@@ -344,6 +347,16 @@ func TestSchemaDocs(t *testing.T) {
 					Path:        "anything",
 					Description: "An object that can be anything",
 					Type:        "object",
+				},
+			},
+		},
+		"types": {
+			schema: types,
+			docs: SchemaDocs{
+				{
+					Path:        "port",
+					Description: "The port of the service",
+					Type:        "[string, integer]",
 				},
 			},
 		},

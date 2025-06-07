@@ -242,69 +242,79 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 
 	type_, found := schema["type"]
 	if found {
-		var resolvedType string
-		tString, ok := type_.(string)
-		if ok {
-			resolvedType = tString
-		} else {
-			tArray, ok := type_.([]any)
-			if ok {
-				for _, it := range tArray {
-					if it.(string) != "null" {
-						resolvedType = it.(string)
-						break
-					}
+		var types []string
+		switch type_ := type_.(type) {
+		case string:
+			types = []string{type_}
+		case []any:
+			for _, t_ := range type_ {
+				t, ok := t_.(string)
+				if !ok {
+					panic(fmt.Sprintf("expected all elements in `type` to be a string, got %v", t_))
 				}
-			} else {
-				panic(fmt.Sprintf("expected the type to be a string or an array, got %v", type_))
+				if t != "null" {
+					types = append(types, t)
+				}
 			}
+		default:
+			panic(fmt.Sprintf("expected type to be a string or an array, got %v", type_))
+		}
+		typeString := types[0]
+		if len(types) > 1 {
+			typeString = fmt.Sprintf("[%s]", strings.Join(types, ", "))
 		}
 		if path != "" {
 			docs = append(docs, Property{
 				Path:        path,
 				Description: desc,
-				Type:        resolvedType,
+				Type:        typeString,
 			})
 		}
-		switch resolvedType {
-		case "object":
-			properties_, found := schema["properties"]
-			if !found {
-				break
-			}
-			properties, ok := properties_.(map[string]any)
-			if !ok {
-				panic(fmt.Sprintf("expected properties to be map[string]any, got %T", properties_))
-			}
-			for property, subSchema_ := range properties {
-				subSchema, ok := subSchema_.(map[string]any)
+		if len(types) == 1 {
+			switch types[0] {
+			case "object":
+				properties_, found := schema["properties"]
+				if !found {
+					break
+				}
+				properties, ok := properties_.(map[string]any)
 				if !ok {
-					panic(fmt.Sprintf("expected schema to be map[string]any, got %T", subSchema_))
+					panic(fmt.Sprintf("expected properties to be map[string]any, got %T", properties_))
+				}
+				for property, subSchema_ := range properties {
+					subSchema, ok := subSchema_.(map[string]any)
+					if !ok {
+						panic(fmt.Sprintf("expected schema to be map[string]any, got %T", subSchema_))
+					}
+					var subPath string
+					if path == "" {
+						subPath = property
+					} else {
+						subPath = path + "." + property
+					}
+					docs = append(docs, walkSchemaDocs(subPath, subSchema)...)
+				}
+			case "array":
+				items_, found := schema["items"]
+				if !found {
+					panic("expected an array to have items")
+				}
+				items, ok := items_.(map[string]any)
+				if !ok {
+					panic(fmt.Sprintf("expected items to be map[string]any, got %T", items_))
 				}
 				var subPath string
 				if path == "" {
-					subPath = property
+					subPath = "[]"
 				} else {
-					subPath = path + "." + property
+					subPath = path + "[]"
 				}
-				docs = append(docs, walkSchemaDocs(subPath, subSchema)...)
+				docs = append(docs, walkSchemaDocs(subPath, items)...)
 			}
-		case "array":
-			items_, found := schema["items"]
-			if !found {
-				panic("expected an array to have items")
+		} else {
+			if slices.Contains(types, "object") || slices.Contains(types, "array") {
+				panic("multiple types containing object or array not supported")
 			}
-			items, ok := items_.(map[string]any)
-			if !ok {
-				panic(fmt.Sprintf("expected items to be map[string]any, got %T", items_))
-			}
-			var subPath string
-			if path == "" {
-				subPath = "[]"
-			} else {
-				subPath = path + "[]"
-			}
-			docs = append(docs, walkSchemaDocs(subPath, items)...)
 		}
 		return docs
 	}
