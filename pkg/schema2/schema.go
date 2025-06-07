@@ -246,7 +246,8 @@ func (s *Schema) HtmlDocs(highlightProperty string) string {
 	}
 
 	if highlightProperty != "" {
-		fmt.Fprintf(&output, `  <script>window.location.hash = "%s"</script>\n`, highlightProperty)
+		fmt.Fprintf(&output, `  <script>window.location.hash = "%s"</script>`, highlightProperty)
+		fmt.Fprintln(&output, "")
 	}
 
 	fmt.Fprintln(&output, "</body>")
