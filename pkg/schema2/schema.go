@@ -192,18 +192,6 @@ func (p Paths) AtCursor(line, char int) (string, bool) {
 // JSON SCHEMAS
 // ------------
 
-func GetSchema(contents string) (Schema, bool) {
-	// TODO: Support other schemas than service-v1
-	if strings.HasPrefix(contents, `kind: Service
-apiVersion: v1`) {
-		return Schema{
-			loader: gojsonschema.NewReferenceLoader("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/refs/heads/master/master-standalone-strict/service-v1.json"),
-		}, true
-	} else {
-		return Schema{}, false
-	}
-}
-
 type Schema struct{ loader gojsonschema.JSONLoader }
 
 func (s *Schema) Fill() string { panic("todo") }
@@ -223,8 +211,53 @@ func (s *Schema) Docs() SchemaDocs {
 	return docs
 }
 
+func (s *Schema) HtmlDocs(highlightProperty string) string {
+	docs := s.Docs()
+	output := strings.Builder{}
+	fmt.Fprint(&output, `<!DOCTYPE html>
+<html>
+<head>
+  <title>Documentation</title>
+  <style>
+    body {background-color: #3f3f3f; color: #DCDCCC;}
+    code.required {color: #E0CF9F;}
+    span.path {color: #DCA3A3; }
+  </style>
+</head>
+`)
+	fmt.Fprintln(&output, "<body>")
+
+	for _, property := range docs {
+		fmt.Fprintln(&output, "  <p>")
+
+		requiredClass := ""
+		if property.Required {
+			requiredClass = ` class="required"`
+		}
+		fmt.Fprintf(&output, `    <span class="path" id="%s">%s</span> <code%s>[%s]</code>`, property.Path, property.Path, requiredClass, property.Type)
+
+		fmt.Fprintln(&output)
+		if property.Description != "" {
+			fmt.Fprint(&output, "    <br>\n")
+			fmt.Fprintf(&output, "    %s\n", property.Description)
+		}
+		fmt.Fprintln(&output, "  </p>")
+	}
+
+	if highlightProperty != "" {
+		fmt.Fprintf(&output, `  <script>window.location.hash = "%s"</script>\n`, highlightProperty)
+	}
+
+	fmt.Fprintln(&output, "</body>")
+	fmt.Fprintln(&output, "</html>")
+	return output.String()
+}
+
 type SchemaDocs []Property
-type Property struct{ Path, Description, Type string }
+type Property struct {
+	Path, Description, Type string
+	Required                bool
+}
 
 // What should it do on anyOf, oneOf, allOf and not?
 // - anyOf and oneOf: Return a list of SchemaDocs probably
@@ -300,6 +333,15 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 				if !ok {
 					panic(fmt.Sprintf("expected properties to be map[string]any, got %T", properties_))
 				}
+				var requiredProperties []string
+				if required_, found := schema["required"]; found {
+					required, ok := required_.([]any)
+					if ok {
+						for _, p := range required {
+							requiredProperties = append(requiredProperties, p.(string))
+						}
+					}
+				}
 				for property, subSchema_ := range properties {
 					subSchema, ok := subSchema_.(map[string]any)
 					if !ok {
@@ -311,7 +353,11 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 					} else {
 						subPath = path + "." + property
 					}
-					docs = append(docs, walkSchemaDocs(subPath, subSchema)...)
+					subDocs := walkSchemaDocs(subPath, subSchema)
+					if slices.Contains(requiredProperties, property) {
+						subDocs[0].Required = true
+					}
+					docs = append(docs, subDocs...)
 				}
 			case "array":
 				items_, found := schema["items"]

@@ -30,12 +30,7 @@ type KubernetesStore struct {
 
 func (s KubernetesStore) Get(contents string) (Schema, bool) {
 	kind, apiVersion := findKindAndApiVersion(contents)
-	// fmt.Println(kind, apiVersion)
 	key := buildKubernetesKey(kind, apiVersion)
-	// fmt.Println(key)
-	for k, _ := range s.db {
-		fmt.Println(k)
-	}
 	if schema, found := s.db[key]; found {
 		return schema, true
 	}
