@@ -204,6 +204,33 @@ func (s *Schema) Docs() SchemaDocs {
 	return docs
 }
 
+type SchemaDocs []Property
+type Property struct{ Path, Description, Type string }
+
+// What should it do on anyOf, oneOf, allOf and not?
+// - anyOf and oneOf: Return a list of SchemaDocs probably
+// - allOf: Combine into one schema
+// - not: Probably not support for docs
+// schema identifiers:
+// - type: string
+// - type: array of strings
+// - const
+// - enum
+// - x-kubernetes-preserve-unknown-fields
+// - oneOf
+// - anyOf
+
+// Use ?<number> when there are multiple schemas to choose from as in anyOf and oneOf
+//
+// kind           The kind         string
+// apiVersion     The apiVersion   string
+// metadata       The metadata     object
+// metadata.name  The name         string
+// port?0         The port number  integer
+// port?1         The port object  object
+// port?1.number  The port number  integer
+// port?1.name    The port name    string
+
 func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 	var docs SchemaDocs
 	type_, found := schema["type"]
@@ -276,21 +303,30 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 			}
 			docs = append(docs, walkSchemaDocs(subPath, items)...)
 		}
-	} else {
-		if oneOf_, found := schema["oneOf"]; found {
-			oneOf, ok := oneOf_.([]any)
-			if !ok {
-				panic(fmt.Sprintf("expected oneOf to be []any, got %T", oneOf_))
-			}
-			first := oneOf[0].(map[string]any)
-			docs = append(docs, walkSchemaDocs(path, first)...)
-		}
+		return docs
 	}
-	return docs
-}
 
-type SchemaDocs []Property
-type Property struct{ Path, Description, Type string }
+	var choices []any
+	if oneOf_, found := schema["oneOf"]; found {
+		oneOf, ok := oneOf_.([]any)
+		if !ok {
+			panic(fmt.Sprintf("expected oneOf to be []any, got %T", oneOf_))
+		}
+		choices = oneOf
+	} else if anyOf_, found := schema["anyOf"]; found {
+		anyOf, ok := anyOf_.([]any)
+		if !ok {
+			panic(fmt.Sprintf("expected anyOf to be []any, got %T", anyOf_))
+		}
+		choices = anyOf
+	}
+	if choices != nil {
+		first := choices[0].(map[string]any)
+		docs = append(docs, walkSchemaDocs(path, first)...)
+		return docs
+	}
+	panic("not supported")
+}
 
 type JsonValidationError struct{ Field, Message, Type string }
 

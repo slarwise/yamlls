@@ -7,9 +7,9 @@ import (
 )
 
 func main() {
-	// docs()
-	hover()
-	validate()
+	docs()
+	// hover()
+	// validate()
 }
 
 func docs() {
