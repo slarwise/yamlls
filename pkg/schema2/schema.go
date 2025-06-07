@@ -219,7 +219,8 @@ func (s *Schema) HtmlDocs(highlightProperty string) string {
 <head>
   <title>Documentation</title>
   <style>
-    body {background-color: #3f3f3f; color: #DCDCCC;}
+    body {background-color: #3f3f3f; color: #DCDCCC; font-size: 18px; }
+    code {font-size: 80%;}
     code.required {color: #E0CF9F;}
     span.path {color: #DCA3A3; }
   </style>
