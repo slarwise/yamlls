@@ -321,8 +321,13 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 		choices = anyOf
 	}
 	if choices != nil {
-		first := choices[0].(map[string]any)
-		docs = append(docs, walkSchemaDocs(path, first)...)
+		for i, choice_ := range choices {
+			choice, ok := choice_.(map[string]any)
+			if !ok {
+				panic(fmt.Sprintf("expected an anyOf or oneOf element to be map[string]any, got %T", choice_))
+			}
+			docs = append(docs, walkSchemaDocs(fmt.Sprintf("%s?%d", path, i), choice)...)
+		}
 		return docs
 	}
 	panic("not supported")
