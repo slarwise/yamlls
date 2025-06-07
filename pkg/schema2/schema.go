@@ -212,7 +212,10 @@ func (s *Schema) Docs() SchemaDocs {
 }
 
 type SchemaDocs []Property
-type Property struct{ Path, Description, Type string }
+type Property struct {
+	Path, Description, Type string
+	Required                bool
+}
 
 // What should it do on anyOf, oneOf, allOf and not?
 // - anyOf and oneOf: Return a list of SchemaDocs probably
@@ -288,6 +291,15 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 				if !ok {
 					panic(fmt.Sprintf("expected properties to be map[string]any, got %T", properties_))
 				}
+				var requiredProperties []string
+				if required_, found := schema["required"]; found {
+					required, ok := required_.([]any)
+					if ok {
+						for _, p := range required {
+							requiredProperties = append(requiredProperties, p.(string))
+						}
+					}
+				}
 				for property, subSchema_ := range properties {
 					subSchema, ok := subSchema_.(map[string]any)
 					if !ok {
@@ -299,7 +311,11 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 					} else {
 						subPath = path + "." + property
 					}
-					docs = append(docs, walkSchemaDocs(subPath, subSchema)...)
+					subDocs := walkSchemaDocs(subPath, subSchema)
+					if slices.Contains(requiredProperties, property) {
+						subDocs[0].Required = true
+					}
+					docs = append(docs, subDocs...)
 				}
 			case "array":
 				items_, found := schema["items"]
