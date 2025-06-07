@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "level": {
+      "enum": ["info", "warning", "error"],
+      "description": "The log level"
+    }
+  }
+}

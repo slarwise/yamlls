@@ -1,3 +1,36 @@
+kind: Application
+apiVersion: argoproj.io/v1alpha1
+metadata:
+  name: hej
+spec:
+  destination:
+    name: ""
+    namespace: ""
+    server: ""
+  project: ""
+  sources:
+    - repoURL: https://github.com/yolo/swag
+      targetRevision: main
+---
 kind: Service
 apiVersion: v1
+metadata: # This doesn't work
+  name: hej
+spec: # This doesn't work
+  ports:
+    - port: 8080
+      name: asdf
+    - por: 3800
+---
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: hej
 spec: {}
+---
+kind: Deployment
+apiVersion: apps/v1
+spec:
+  selector: {}
+  template:
+    spec:

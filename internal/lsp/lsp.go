@@ -30,10 +30,10 @@ func (r Request) IsJSONRPC() bool {
 }
 
 type OutgoingRequest struct {
-	ProtocolVersion string      `json:"jsonrpc"`
-	ID              string      `json:"id"`
-	Method          string      `json:"method"`
-	Params          interface{} `json:"params"`
+	ProtocolVersion string `json:"jsonrpc"`
+	ID              string `json:"id"`
+	Method          string `json:"method"`
+	Params          any    `json:"params"`
 }
 
 func (r OutgoingRequest) IsJSONRPC() bool {
@@ -209,10 +209,6 @@ func (m *Mux) Request(method string, params any) error {
 		Params:          params,
 	}
 	return m.write(r)
-}
-
-func ptr[T any](v T) *T {
-	return &v
 }
 
 func (m *Mux) write(msg Message) error {
