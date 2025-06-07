@@ -211,6 +211,48 @@ func (s *Schema) Docs() SchemaDocs {
 	return docs
 }
 
+func (s *Schema) HtmlDocs(highlightProperty string) string {
+	docs := s.Docs()
+	output := strings.Builder{}
+	fmt.Fprint(&output, `<!DOCTYPE html>
+<html>
+<head>
+  <title>Documentation</title>
+  <style>
+    body {background-color: #3f3f3f; color: #DCDCCC;}
+    code.required {color: #E0CF9F;}
+    span.path {color: #DCA3A3; }
+  </style>
+</head>
+`)
+	fmt.Fprintln(&output, "<body>")
+
+	for _, property := range docs {
+		fmt.Fprintln(&output, "  <p>")
+
+		requiredClass := ""
+		if property.Required {
+			requiredClass = ` class="required"`
+		}
+		fmt.Fprintf(&output, `    <span class="path" id="%s">%s</span> <code%s>[%s]</code>`, property.Path, property.Path, requiredClass, property.Type)
+
+		fmt.Fprintln(&output)
+		if property.Description != "" {
+			fmt.Fprint(&output, "    <br>\n")
+			fmt.Fprintf(&output, "    %s\n", property.Description)
+		}
+		fmt.Fprintln(&output, "  </p>")
+	}
+
+	if highlightProperty != "" {
+		fmt.Fprintf(&output, `  <script>window.location.hash = "%s"</script>\n`, highlightProperty)
+	}
+
+	fmt.Fprintln(&output, "</body>")
+	fmt.Fprintln(&output, "</html>")
+	return output.String()
+}
+
 type SchemaDocs []Property
 type Property struct {
 	Path, Description, Type string
