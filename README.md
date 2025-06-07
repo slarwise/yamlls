@@ -7,8 +7,7 @@
 - Code Action: Open documentation in browser
 - Diagnostics: Validate yaml syntax
 - Diagnostics: Validate against schema
-- Diagnostics - Kustomization: Warn when not all yaml files in the current dir
-  are included as resources
+- UPDATE: Not anymore, need to add it back: Kustomization: Warn when not all yaml files in the current dir are included as resources
 
 ## Automatically detected schemas
 
@@ -16,7 +15,7 @@
   Detected from `kind` and `apiVersion`.
 - [Custom Resource Definitions](https://github.com/datreeio/CRDs-catalog).
   Detected from `kind` and `apiVersion`.
-- [JSON Schema Store](https://json.schemastore.org). Detected from filename.
+- UPDATE: Not anymore, need to add it back: [JSON Schema Store](https://json.schemastore.org). Detected from filename.
 
 ## Installation
 
@@ -82,7 +81,6 @@ tail -f ~/Library/Caches/yamlls/log | jq # Follow the logs from yamlls (on a mac
 
 ## Potential TODO's
 
-- Use an offline documentation generator
 - Completion
   - If `kind` or `apiVersion` is given, give completion suggestions for the
     other
