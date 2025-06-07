@@ -192,18 +192,6 @@ func (p Paths) AtCursor(line, char int) (string, bool) {
 // JSON SCHEMAS
 // ------------
 
-func GetSchema(contents string) (Schema, bool) {
-	// TODO: Support other schemas than service-v1
-	if strings.HasPrefix(contents, `kind: Service
-apiVersion: v1`) {
-		return Schema{
-			loader: gojsonschema.NewReferenceLoader("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/refs/heads/master/master-standalone-strict/service-v1.json"),
-		}, true
-	} else {
-		return Schema{}, false
-	}
-}
-
 type Schema struct{ loader gojsonschema.JSONLoader }
 
 func (s *Schema) Fill() string { panic("todo") }
