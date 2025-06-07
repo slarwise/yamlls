@@ -216,7 +216,7 @@ type Property struct{ Path, Description, Type string }
 // - [ ] type: array of strings
 // - [x] const
 // - [x] enum
-// - [ ] x-kubernetes-preserve-unknown-fields
+// - [x] x-kubernetes-preserve-unknown-fields
 // - [x] oneOf
 // - [x] anyOf
 // - [ ] allOf
@@ -232,6 +232,7 @@ type Property struct{ Path, Description, Type string }
 // port?1.number  The port number  integer
 // port?1.name    The port name    string
 
+// TODO: Support $ref keyword
 func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 	var docs SchemaDocs
 	var desc string
@@ -349,6 +350,17 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 				Path:        path,
 				Description: desc,
 				Type:        "enum",
+			})
+		}
+		return docs
+	}
+
+	if _, found := schema["x-kubernetes-preserve-unknown-fields"]; found {
+		if path != "" {
+			docs = append(docs, Property{
+				Path:        path,
+				Description: desc,
+				Type:        "object",
 			})
 		}
 		return docs
