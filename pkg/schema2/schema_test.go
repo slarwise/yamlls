@@ -61,7 +61,7 @@ func TestValidateFile(t *testing.T) {
 	}))
 
 	defer githubServer.Close()
-	setGithubRawContentsHost(githubServer.URL)
+	githubRawContentsHost = githubServer.URL
 
 	store, err := NewKubernetesStore()
 	if err != nil {

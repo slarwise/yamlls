@@ -12,11 +12,8 @@ import (
 	"github.com/xeipuuv/gojsonschema"
 )
 
+// Change this when testing to http://localhost:<port>
 var githubRawContentsHost = "https://raw.githubusercontent.com"
-
-// Used for testing only to mock the github calls
-// Must be called before calling NewKubernetesStore()
-func setGithubRawContentsHost(host string) { githubRawContentsHost = host }
 
 func NewKubernetesStore() (KubernetesStore, error) {
 	db, err := setupKubernetesDatabase()
