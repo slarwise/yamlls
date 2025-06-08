@@ -135,7 +135,7 @@ func main() {
 			return nil, err
 		}
 		contents := filenameToContents[params.TextDocument.URI.Filename()]
-		documentation, err := schema2.DocumentationAtCursor(contents, int(params.Position.Line), int(params.Position.Character), kubernetesStore)
+		documentation, err := kubernetesStore.DocumentationAtCursor(contents, int(params.Position.Line), int(params.Position.Character))
 		if err != nil {
 			logger.Error("failed to get description", "line", params.Position.Line, "char", params.Position.Character, "err", err)
 			return nil, nil
@@ -168,7 +168,7 @@ func main() {
 			return nil, err
 		}
 		contents := filenameToContents[params.TextDocument.URI.Filename()]
-		documentation, found := schema2.HtmlDocumentation(contents, int(params.Range.Start.Line), int(params.Range.Start.Character), kubernetesStore)
+		documentation, found := kubernetesStore.HtmlDocumentation(contents, int(params.Range.Start.Line), int(params.Range.Start.Character))
 		if !found {
 			return "", errors.New("no schema found")
 		}
@@ -231,8 +231,8 @@ func main() {
 	os.Exit(1)
 }
 
-func validateFile(contents string, store schema2.Store) ([]protocol.Diagnostic, error) {
-	errors := schema2.ValidateFile(contents, store)
+func validateFile(contents string, store schema2.KubernetesStore) ([]protocol.Diagnostic, error) {
+	errors := store.ValidateFile(contents)
 	diagnostics := []protocol.Diagnostic{}
 	for _, e := range errors {
 		diagnostics = append(diagnostics, protocol.Diagnostic{

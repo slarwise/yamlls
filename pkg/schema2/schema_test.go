@@ -2,26 +2,71 @@ package schema2
 
 import (
 	_ "embed"
-	"strings"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/xeipuuv/gojsonschema"
 )
 
-type SimpleStore struct{}
+//go:embed testdata/service-v1.json
+var service []byte
 
-func (s SimpleStore) get(contents string) (schema, bool) {
-	if strings.HasPrefix(contents, `kind: Service
-apiVersion: v1`) {
-		return schema{
-			loader: gojsonschema.NewReferenceLoader("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/refs/heads/master/master-standalone-strict/service-v1.json"),
-		}, true
-	} else {
-		return schema{}, false
-	}
-}
 func TestValidateFile(t *testing.T) {
+	githubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/yannh/kubernetes-json-schema/master/master-standalone-strict/_definitions.json":
+			resp := map[string]any{
+				"definitions": map[string]any{
+					"io.k8s.api.core.v1.Service": map[string]any{
+						"x-kubernetes-group-version-kind": []map[string]string{
+							{
+								"group":   "",
+								"kind":    "Service",
+								"version": "v1",
+							},
+						},
+					},
+				},
+			}
+			bytes, err := json.Marshal(resp)
+			if err != nil {
+				panic(fmt.Sprintf("failed to marshal definitions response: %v", err))
+			}
+			_, _ = w.Write(bytes)
+		case "/datreeio/CRDs-catalog/refs/heads/main/index.yaml":
+			resp := map[string]any{
+				"aadpodidentity.k8s.io": []any{
+					map[string]string{
+						"apiVersion": "aadpodidentity.k8s.io/v1",
+						"filename":   "aadpodidentity.k8s.io/azureidentity_v1.json",
+						"kind":       "AzureIdentity",
+						"name":       "azureidentity_v1",
+					},
+				},
+			}
+			bytes, err := yaml.Marshal(resp)
+			if err != nil {
+				panic(fmt.Sprintf("failed to marshal index response: %v", err))
+			}
+			_, _ = w.Write(bytes)
+		case "/yannh/kubernetes-json-schema/master/master-standalone-strict/service-v1.json":
+			_, _ = w.Write(service)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
 
+	defer githubServer.Close()
+	setGithubRawContentsHost(githubServer.URL)
+
+	store, err := NewKubernetesStore()
+	if err != nil {
+		t.Fatalf("create kubernetes store: %v", err)
+	}
 	tests := map[string]struct {
 		file   string
 		errors []validationError
@@ -87,7 +132,7 @@ apiVersion: 1990
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			errors := ValidateFile(test.file, SimpleStore{})
+			errors := store.ValidateFile(test.file)
 			if len(errors) != len(test.errors) {
 				t.Fatalf("Expected %d errors, got %v", len(test.errors), errors)
 			}

@@ -12,9 +12,11 @@ import (
 	"github.com/xeipuuv/gojsonschema"
 )
 
-type Store interface {
-	get(string) (schema, bool)
-}
+var githubRawContentsHost = "https://raw.githubusercontent.com"
+
+// Used for testing only to mock the github calls
+// Must be called before calling NewKubernetesStore()
+func setGithubRawContentsHost(host string) { githubRawContentsHost = host }
 
 func NewKubernetesStore() (KubernetesStore, error) {
 	db, err := setupKubernetesDatabase()
@@ -98,7 +100,7 @@ type groupVersionKind struct {
 }
 
 func getNativeResourceDefinitions() ([]resource, error) {
-	definitionsUrl := "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/_definitions.json"
+	definitionsUrl := githubRawContentsHost + "/yannh/kubernetes-json-schema/master/master-standalone-strict/_definitions.json"
 	var resp definitionsResponse
 	if err := getJson(definitionsUrl, &resp); err != nil {
 		return nil, fmt.Errorf("get definitions in yannh/kubernetes-json-schema: %v", err)
@@ -118,7 +120,7 @@ func getNativeResourceDefinitions() ([]resource, error) {
 				apiVersion = fmt.Sprintf("%s/%s", group, version)
 				basename = fmt.Sprintf("%s-%s-%s.json", strings.ToLower(kind), group, version)
 			}
-			url := fmt.Sprintf("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/%s", basename)
+			url := fmt.Sprintf("%s/yannh/kubernetes-json-schema/master/master-standalone-strict/%s", githubRawContentsHost, basename)
 			resources = append(resources, resource{
 				Kind:       kind,
 				ApiVersion: apiVersion,
@@ -130,7 +132,7 @@ func getNativeResourceDefinitions() ([]resource, error) {
 }
 
 func getCustomResourceDefinitions() ([]resource, error) {
-	indexUrl := "https://raw.githubusercontent.com/datreeio/CRDs-catalog/refs/heads/main/index.yaml"
+	indexUrl := githubRawContentsHost + "/datreeio/CRDs-catalog/refs/heads/main/index.yaml"
 	var index map[string][]struct {
 		Kind       string `yaml:"kind"`
 		ApiVersion string `yaml:"apiVersion"`
@@ -145,7 +147,7 @@ func getCustomResourceDefinitions() ([]resource, error) {
 			allCrds = append(allCrds, resource{
 				Kind:       crd.Kind,
 				ApiVersion: crd.ApiVersion,
-				Url:        fmt.Sprintf("https://raw.githubusercontent.com/datreeio/CRDs-catalog/refs/heads/main/%s", crd.Filename),
+				Url:        fmt.Sprintf("%s/datreeio/CRDs-catalog/refs/heads/main/%s", githubRawContentsHost, crd.Filename),
 			})
 		}
 	}
