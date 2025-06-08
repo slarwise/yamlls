@@ -43,13 +43,8 @@ metadata:
 `,
 			errors: []ValidationError{
 				{
-					Position: Position{
-						LineStart: 4,
-						LineEnd:   4,
-						CharStart: 2,
-						CharEnd:   6,
-					},
-					Type: "additional_property_not_allowed",
+					Range: newRange(4, 2, 4, 6),
+					Type:  "additional_property_not_allowed",
 				},
 			},
 		},
@@ -67,13 +62,8 @@ metadata:
 `,
 			errors: []ValidationError{
 				{
-					Position: Position{
-						LineStart: 9,
-						LineEnd:   9,
-						CharStart: 2,
-						CharEnd:   6,
-					},
-					Type: "additional_property_not_allowed",
+					Range: newRange(9, 2, 9, 6),
+					Type:  "additional_property_not_allowed",
 				},
 			},
 		},
@@ -83,13 +73,8 @@ reason
 `,
 			errors: []ValidationError{
 				{
-					Position: Position{
-						LineStart: 0,
-						LineEnd:   2,
-						CharStart: 0,
-						CharEnd:   0,
-					},
-					Type: "invalid_yaml",
+					Range: newRange(0, 0, 2, 0),
+					Type:  "invalid_yaml",
 				},
 			},
 		},
@@ -108,8 +93,8 @@ apiVersion: 1990
 			}
 			for i, e := range errors {
 				expected := test.errors[i]
-				if e.Position != expected.Position {
-					t.Fatalf("expected error at position `%v`, got `%v`", expected.Position, e.Position)
+				if e.Range != expected.Range {
+					t.Fatalf("expected error at position `%v`, got `%v`", expected.Range, e.Range)
 				}
 				if e.Type != expected.Type {
 					t.Fatalf("Expected type `%s`, got `%s`", expected.Type, e.Type)
@@ -225,11 +210,11 @@ var types string
 func TestSchemaDocs(t *testing.T) {
 	tests := map[string]struct {
 		schema string
-		docs   SchemaDocs
+		docs   SchemaProperties
 	}{
 		"simple": {
 			schema: `{"type": "object", "properties": {"name": {"type": "string", "description": "The name of the person"}}}`,
-			docs: SchemaDocs{
+			docs: SchemaProperties{
 				{
 					Path:        "name",
 					Description: "The name of the person",
@@ -242,7 +227,7 @@ func TestSchemaDocs(t *testing.T) {
 					"name":    {"type": "string",  "description": "The name of the person"},
 					"riddler": {"type": "boolean", "description": "riddle-riddle-riddle-riddle-riddle-diddle-diddle"}
 				}}`,
-			docs: SchemaDocs{
+			docs: SchemaProperties{
 				{
 					Path:        "name",
 					Description: "The name of the person",
@@ -265,7 +250,7 @@ func TestSchemaDocs(t *testing.T) {
 						}
 					}}
 				}}`,
-			docs: SchemaDocs{
+			docs: SchemaProperties{
 				{
 					Path:        "tonyz",
 					Description: "Tony Zarets",
@@ -285,7 +270,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"oneOf": {
 			schema: oneOf,
-			docs: SchemaDocs{
+			docs: SchemaProperties{
 				{
 					Path:        "port",
 					Description: "The port of the service",
@@ -305,7 +290,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"anyOf": {
 			schema: anyOf,
-			docs: SchemaDocs{
+			docs: SchemaProperties{
 				{
 					Path:        "port",
 					Description: "The port of the service",
@@ -325,7 +310,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"const": {
 			schema: const_,
-			docs: SchemaDocs{
+			docs: SchemaProperties{
 				{
 					Path:        "kind",
 					Description: "The service kind",
@@ -335,7 +320,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"enum": {
 			schema: enum,
-			docs: SchemaDocs{
+			docs: SchemaProperties{
 				{
 					Path:        "level",
 					Description: "The log level",
@@ -345,7 +330,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"x-kubernetes-preserve-unknown-fields": {
 			schema: xKubernetesPreserveUnknownFields,
-			docs: SchemaDocs{
+			docs: SchemaProperties{
 				{
 					Path:        "anything",
 					Description: "An object that can be anything",
@@ -355,7 +340,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"types": {
 			schema: types,
-			docs: SchemaDocs{
+			docs: SchemaProperties{
 				{
 					Path:        "port",
 					Description: "The port of the service",
@@ -402,54 +387,14 @@ func TestDocumentPaths(t *testing.T) {
       name: http
 `,
 			paths: Paths{
-				"spec": Position{
-					LineStart: 0,
-					LineEnd:   0,
-					CharStart: 0,
-					CharEnd:   4,
-				},
-				"spec.ports": Position{
-					LineStart: 1,
-					LineEnd:   1,
-					CharStart: 2,
-					CharEnd:   7,
-				},
-				"spec.ports.0": Position{
-					LineStart: 2,
-					LineEnd:   2,
-					CharStart: 4,
-					CharEnd:   5,
-				},
-				"spec.ports.0.port": Position{
-					LineStart: 2,
-					LineEnd:   2,
-					CharStart: 6,
-					CharEnd:   10,
-				},
-				"spec.ports.0.name": Position{
-					LineStart: 3,
-					LineEnd:   3,
-					CharStart: 6,
-					CharEnd:   10,
-				},
-				"spec.ports.1": Position{
-					LineStart: 4,
-					LineEnd:   4,
-					CharStart: 4,
-					CharEnd:   5,
-				},
-				"spec.ports.1.port": Position{
-					LineStart: 4,
-					LineEnd:   4,
-					CharStart: 6,
-					CharEnd:   10,
-				},
-				"spec.ports.1.name": Position{
-					LineStart: 5,
-					LineEnd:   5,
-					CharStart: 6,
-					CharEnd:   10,
-				},
+				"spec":              newRange(0, 0, 0, 4),
+				"spec.ports":        newRange(1, 2, 1, 7),
+				"spec.ports.0":      newRange(2, 4, 2, 5),
+				"spec.ports.0.port": newRange(2, 6, 2, 10),
+				"spec.ports.0.name": newRange(3, 6, 3, 10),
+				"spec.ports.1":      newRange(4, 4, 4, 5),
+				"spec.ports.1.port": newRange(4, 6, 4, 10),
+				"spec.ports.1.name": newRange(5, 6, 5, 10),
 			},
 		},
 	}

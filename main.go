@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 
 	"github.com/slarwise/yamlls/internal/lsp"
 	"github.com/slarwise/yamlls/pkg/schema2"
@@ -234,12 +233,12 @@ func validateFile(contents string, store schema2.Store) ([]protocol.Diagnostic, 
 		diagnostics = append(diagnostics, protocol.Diagnostic{
 			Range: protocol.Range{
 				Start: protocol.Position{
-					Line:      uint32(e.Position.LineStart),
-					Character: uint32(e.Position.CharStart),
+					Line:      uint32(e.Range.Start.Line),
+					Character: uint32(e.Range.Start.Char),
 				},
 				End: protocol.Position{
-					Line:      uint32(e.Position.LineEnd),
-					Character: uint32(e.Position.CharEnd),
+					Line:      uint32(e.Range.End.Line),
+					Character: uint32(e.Range.End.Char),
 				},
 			},
 			Severity: protocol.DiagnosticSeverityError,

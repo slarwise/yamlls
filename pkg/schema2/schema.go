@@ -24,11 +24,15 @@ func ValidateFile(file string, store Store) []ValidationError {
 		doc, ok := NewYamlDocument(contents)
 		if !ok {
 			errors = append(errors, ValidationError{
-				Position: Position{
-					LineStart: docPos.Start,
-					LineEnd:   docPos.End,
-					CharStart: 0,
-					CharEnd:   0,
+				Range: Range{
+					Start: Position{
+						Line: docPos.Start,
+						Char: 0,
+					},
+					End: Position{
+						Line: docPos.End,
+						Char: 0,
+					},
 				},
 				Message: "invalid yaml",
 				Type:    "invalid_yaml",
@@ -45,16 +49,20 @@ func ValidateFile(file string, store Store) []ValidationError {
 		}
 		paths := doc.Paths()
 		for _, e := range schema.Validate(doc) {
-			p, found := paths[e.Field]
+			r, found := paths[e.Field]
 			if !found {
 				panic(fmt.Sprintf("expected path `%s` to exist in the document. Available paths: %v. Error type: %s", e.Field, paths, e.Type))
 			}
 			errors = append(errors, ValidationError{
-				Position: Position{
-					LineStart: docPos.Start + p.LineStart,
-					LineEnd:   docPos.Start + p.LineEnd,
-					CharStart: p.CharStart,
-					CharEnd:   p.CharEnd,
+				Range: Range{
+					Start: Position{
+						Line: docPos.Start + r.Start.Line,
+						Char: r.Start.Char,
+					},
+					End: Position{
+						Line: docPos.Start + r.End.Line,
+						Char: r.End.Char,
+					},
 				},
 				Message: e.Message,
 				Type:    e.Type, // I've got life!
@@ -65,11 +73,20 @@ func ValidateFile(file string, store Store) []ValidationError {
 }
 
 type ValidationError struct {
-	Position Position
-	Message  string
-	Type     string
+	Range   Range
+	Message string
+	Type    string
 }
-type Position struct{ LineStart, LineEnd, CharStart, CharEnd int } // [LineStart, LineEnd], [CharStart, CharEnd), 0-indexed
+
+type Range struct{ Start, End Position } // zero-based, the start character is inclusive and the end character is exclusive
+type Position struct{ Line, Char int }   // zero-based
+
+func newRange(startLine, startChar, endLine, endChar int) Range {
+	return Range{
+		Start: Position{Line: startLine, Char: startChar},
+		End:   Position{Line: endLine, Char: endChar},
+	}
+}
 
 func GetDocumentPositions(file string) []LineRange {
 	var ranges []LineRange
@@ -123,7 +140,7 @@ func (d yamlDocument) Paths() Paths {
 	return paths
 }
 
-type Paths map[string]Position
+type Paths map[string]Range
 
 var (
 	arrayPattern          = regexp.MustCompile(`\[(\d+)\]`)
@@ -149,15 +166,19 @@ func (p Paths) Visit(node ast.Node) ast.Visitor {
 		var char int
 		for existingPath, pos := range p {
 			if existingPath == parent {
-				char = pos.CharStart + 2 // NOTE: Assuming that lists are indented here
+				char = pos.Start.Char + 2 // NOTE: Assuming that lists are indented here
 			}
 		}
 		t := node.GetToken()
-		p[path] = Position{
-			LineStart: t.Position.Line - 1,
-			LineEnd:   t.Position.Line - 1,
-			CharStart: char,
-			CharEnd:   char + 1,
+		p[path] = Range{
+			Start: Position{
+				Line: t.Position.Line - 1,
+				Char: char,
+			},
+			End: Position{
+				Line: t.Position.Line - 1,
+				Char: char + 1,
+			},
 		}
 		return p
 	}
@@ -170,18 +191,22 @@ func (p Paths) Visit(node ast.Node) ast.Visitor {
 		return p
 	}
 	t := node.GetToken()
-	p[path] = Position{
-		LineStart: t.Position.Line - 1,
-		LineEnd:   t.Position.Line - 1,
-		CharStart: t.Position.Column - 1,
-		CharEnd:   t.Position.Column + len(t.Value) - 1,
+	p[path] = Range{
+		Start: Position{
+			Line: t.Position.Line - 1,
+			Char: t.Position.Column - 1,
+		},
+		End: Position{
+			Line: t.Position.Line - 1,
+			Char: t.Position.Column + len(t.Value) - 1,
+		},
 	}
 	return p
 }
 
 func (p Paths) AtCursor(line, char int) (string, bool) {
-	for path, pos := range p {
-		if pos.LineStart == line && pos.CharStart <= char && char < pos.CharEnd {
+	for path, r := range p {
+		if r.Start.Line == line && r.Start.Char <= char && char < r.End.Char {
 			return path, true
 		}
 	}
