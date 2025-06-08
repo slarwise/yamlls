@@ -1,6 +1,7 @@
 package schema2
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -500,13 +501,6 @@ func (s *Schema) Validate(d yamlDocument) []JsonValidationError {
 	return errors
 }
 
-type Error int
-
-const (
-	ErrSchemaNotFound Error = iota
-	ErrPathNotFound
-)
-
 var arrayPath = regexp.MustCompile(`\.\d+`)
 
 // Documentation in html format, with the focus placed on line and char
@@ -542,6 +536,57 @@ func HtmlDocumentation(file string, line int, char int, store Store) (string, bo
 	return schema.HtmlDocs(pathAtCursor), true
 }
 
+type Error error
+
+var (
+	ErrSchemaNotFound         = errors.New("schema not found")
+	ErrPathNotFound           = errors.New("path not found")
+	ErrInvalidDocument        = errors.New("invalid document")
+	ErrDocumentNotFound       = errors.New("document not found")
+	ErrNoDocumentationForPath = errors.New("no documentation for path")
+)
+
 func DocumentationAtCursor(file string, line, char int, store Store) (SchemaProperty, Error) {
-	panic("not implemented")
+	ranges := GetDocumentPositions(file)
+	var maybeValidDocument string
+	for _, r := range ranges {
+		if r.Start <= line && line < r.End {
+			lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
+			maybeValidDocument = strings.Join(lines[r.Start:r.End], "\n")
+			line = line - r.Start
+		}
+	}
+	if maybeValidDocument == "" {
+		return SchemaProperty{}, ErrDocumentNotFound
+	}
+	document, valid := NewYamlDocument(maybeValidDocument)
+	if !valid {
+		return SchemaProperty{}, ErrInvalidDocument
+	}
+	paths := document.Paths()
+	path, found := paths.AtCursor(line, char)
+	if !found {
+		// Happens if the cursor is not on a field or on an empty space
+		return SchemaProperty{}, ErrPathNotFound
+	}
+	schema, schemaFound := store.Get(string(document))
+	if !schemaFound {
+		return SchemaProperty{}, ErrSchemaNotFound
+	}
+	// Turn spec.ports.0.name into spec.ports[].name
+	path = arrayPath.ReplaceAllString(path, "[]")
+	pathFound := false
+	properties := schema.Docs()
+	var property SchemaProperty
+	for _, p := range properties {
+		if p.Path == path {
+			property = p
+			pathFound = true
+			break
+		}
+	}
+	if !pathFound {
+		return SchemaProperty{}, ErrNoDocumentationForPath
+	}
+	return property, nil
 }

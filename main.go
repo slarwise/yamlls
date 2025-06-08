@@ -135,18 +135,18 @@ func main() {
 			return nil, err
 		}
 		contents := filenameToContents[params.TextDocument.URI.Filename()]
-		description, err := getDescription(contents, int(params.Position.Line), int(params.Position.Character), kubernetesStore)
+		documentation, err := schema2.DocumentationAtCursor(contents, int(params.Position.Line), int(params.Position.Character), kubernetesStore)
 		if err != nil {
 			logger.Error("failed to get description", "line", params.Position.Line, "char", params.Position.Character, "err", err)
 			return nil, nil
-		} else if description == "" {
+		} else if documentation.Description == "" {
 			return nil, nil
 		}
 
 		return protocol.Hover{
 			Contents: protocol.MarkupContent{
 				Kind:  protocol.PlainText,
-				Value: description,
+				Value: documentation.Description,
 			},
 		}, nil
 	})
@@ -252,15 +252,4 @@ func validateFile(contents string, store schema2.Store) ([]protocol.Diagnostic, 
 		})
 	}
 	return diagnostics, nil
-}
-
-func getDescription(contents string, line, char int, store schema2.Store) (string, error) {
-	documentation, err := schema2.DocumentationAtCursor(contents, line, char, store)
-	switch err {
-	case schema2.ErrSchemaNotFound:
-		return "", fmt.Errorf("schema not found")
-	case schema2.ErrPathNotFound:
-		return "", fmt.Errorf("no property found under cursor")
-	}
-	return documentation.Description, nil
 }
