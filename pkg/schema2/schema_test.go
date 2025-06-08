@@ -10,21 +10,21 @@ import (
 
 type SimpleStore struct{}
 
-func (s SimpleStore) Get(contents string) (Schema, bool) {
+func (s SimpleStore) get(contents string) (schema, bool) {
 	if strings.HasPrefix(contents, `kind: Service
 apiVersion: v1`) {
-		return Schema{
+		return schema{
 			loader: gojsonschema.NewReferenceLoader("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/refs/heads/master/master-standalone-strict/service-v1.json"),
 		}, true
 	} else {
-		return Schema{}, false
+		return schema{}, false
 	}
 }
 func TestValidateFile(t *testing.T) {
 
 	tests := map[string]struct {
 		file   string
-		errors []ValidationError
+		errors []validationError
 	}{
 		"valid": {
 			file: `kind: Service
@@ -41,7 +41,7 @@ metadata:
   name: hej
   asdf: wasd
 `,
-			errors: []ValidationError{
+			errors: []validationError{
 				{
 					Range: newRange(4, 2, 4, 6),
 					Type:  "additional_property_not_allowed",
@@ -60,7 +60,7 @@ metadata:
   name: hej
   asdf: hej
 `,
-			errors: []ValidationError{
+			errors: []validationError{
 				{
 					Range: newRange(9, 2, 9, 6),
 					Type:  "additional_property_not_allowed",
@@ -71,7 +71,7 @@ metadata:
 			file: `got punched for no: {}
 reason
 `,
-			errors: []ValidationError{
+			errors: []validationError{
 				{
 					Range: newRange(0, 0, 2, 0),
 					Type:  "invalid_yaml",
@@ -107,16 +107,16 @@ apiVersion: 1990
 func TestGetDocumentPositions(t *testing.T) {
 	tests := map[string]struct {
 		file   string
-		ranges []LineRange
+		ranges []lineRange
 	}{
 		"one-doc": {
 			file: `hej: du
 `,
-			ranges: []LineRange{{0, 1}},
+			ranges: []lineRange{{0, 1}},
 		},
 		"one-doc-no-trailing-new-line": {
 			file:   `hej: du`,
-			ranges: []LineRange{{0, 1}},
+			ranges: []lineRange{{0, 1}},
 		},
 		"two-docs": {
 			file: `hej: du
@@ -126,7 +126,7 @@ arvid: hej
 what-if: the joker
 was: blue
 `,
-			ranges: []LineRange{
+			ranges: []lineRange{
 				{0, 2},
 				{3, 6},
 			},
@@ -134,7 +134,7 @@ was: blue
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			ranges := GetDocumentPositions(test.file)
+			ranges := getDocumentPositions(test.file)
 			if len(ranges) != len(test.ranges) {
 				t.Fatalf("Expected %d ranges, got %d", test.ranges, ranges)
 			}
@@ -151,7 +151,7 @@ func TestSchemaValidate(t *testing.T) {
 	tests := map[string]struct {
 		schema string
 		doc    yamlDocument
-		errors []JsonValidationError
+		errors []jsonValidationError
 	}{
 		"valid": {
 			schema: `{"type": "object", "properties": {"name": {"type": "string"}}}`,
@@ -161,7 +161,7 @@ func TestSchemaValidate(t *testing.T) {
 		"one-error": {
 			schema: `{"type": "object", "properties": {"name": {"type": "string"}}}`,
 			doc:    "name: 1",
-			errors: []JsonValidationError{
+			errors: []jsonValidationError{
 				{
 					Field: "name",
 					Type:  "invalid_type",
@@ -171,8 +171,8 @@ func TestSchemaValidate(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			s := Schema{gojsonschema.NewStringLoader(test.schema)}
-			errors := s.Validate(test.doc)
+			s := schema{gojsonschema.NewStringLoader(test.schema)}
+			errors := s.validate(test.doc)
 			if len(errors) != len(test.errors) {
 				t.Fatalf("Expected %d errors, got %v", len(test.errors), errors)
 			}
@@ -210,11 +210,11 @@ var types string
 func TestSchemaDocs(t *testing.T) {
 	tests := map[string]struct {
 		schema string
-		docs   SchemaProperties
+		docs   schemaProperties
 	}{
 		"simple": {
 			schema: `{"type": "object", "properties": {"name": {"type": "string", "description": "The name of the person"}}}`,
-			docs: SchemaProperties{
+			docs: schemaProperties{
 				{
 					Path:        "name",
 					Description: "The name of the person",
@@ -227,7 +227,7 @@ func TestSchemaDocs(t *testing.T) {
 					"name":    {"type": "string",  "description": "The name of the person"},
 					"riddler": {"type": "boolean", "description": "riddle-riddle-riddle-riddle-riddle-diddle-diddle"}
 				}}`,
-			docs: SchemaProperties{
+			docs: schemaProperties{
 				{
 					Path:        "name",
 					Description: "The name of the person",
@@ -250,7 +250,7 @@ func TestSchemaDocs(t *testing.T) {
 						}
 					}}
 				}}`,
-			docs: SchemaProperties{
+			docs: schemaProperties{
 				{
 					Path:        "tonyz",
 					Description: "Tony Zarets",
@@ -270,7 +270,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"oneOf": {
 			schema: oneOf,
-			docs: SchemaProperties{
+			docs: schemaProperties{
 				{
 					Path:        "port",
 					Description: "The port of the service",
@@ -290,7 +290,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"anyOf": {
 			schema: anyOf,
-			docs: SchemaProperties{
+			docs: schemaProperties{
 				{
 					Path:        "port",
 					Description: "The port of the service",
@@ -310,7 +310,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"const": {
 			schema: const_,
-			docs: SchemaProperties{
+			docs: schemaProperties{
 				{
 					Path:        "kind",
 					Description: "The service kind",
@@ -320,7 +320,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"enum": {
 			schema: enum,
-			docs: SchemaProperties{
+			docs: schemaProperties{
 				{
 					Path:        "level",
 					Description: "The log level",
@@ -330,7 +330,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"x-kubernetes-preserve-unknown-fields": {
 			schema: xKubernetesPreserveUnknownFields,
-			docs: SchemaProperties{
+			docs: schemaProperties{
 				{
 					Path:        "anything",
 					Description: "An object that can be anything",
@@ -340,7 +340,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"types": {
 			schema: types,
-			docs: SchemaProperties{
+			docs: schemaProperties{
 				{
 					Path:        "port",
 					Description: "The port of the service",
@@ -351,7 +351,7 @@ func TestSchemaDocs(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			s := Schema{loader: gojsonschema.NewStringLoader(test.schema)}
+			s := schema{loader: gojsonschema.NewStringLoader(test.schema)}
 			docs := s.Docs()
 			t.Log(docs)
 			if len(docs) != len(test.docs) {
@@ -376,7 +376,7 @@ func TestSchemaDocs(t *testing.T) {
 func TestDocumentPaths(t *testing.T) {
 	tests := map[string]struct {
 		document yamlDocument
-		paths    Paths
+		paths    paths
 	}{
 		"array": {
 			document: `spec:
@@ -386,7 +386,7 @@ func TestDocumentPaths(t *testing.T) {
     - port: 80
       name: http
 `,
-			paths: Paths{
+			paths: paths{
 				"spec":              newRange(0, 0, 0, 4),
 				"spec.ports":        newRange(1, 2, 1, 7),
 				"spec.ports.0":      newRange(2, 4, 2, 5),

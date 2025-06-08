@@ -7,6 +7,8 @@ import (
 	"go.lsp.dev/protocol"
 )
 
+// TODO: Not really a reason to test this since it just wraps
+// schema2.ValidateFile. Merge these tests with schema_test
 func TestValidateFile(t *testing.T) {
 	store, err := schema2.NewKubernetesStore()
 	if err != nil {
