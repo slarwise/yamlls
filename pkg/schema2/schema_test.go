@@ -69,7 +69,7 @@ func TestValidateFile(t *testing.T) {
 	}
 	tests := map[string]struct {
 		file   string
-		errors []validationError
+		errors []ValidationError
 	}{
 		"valid": {
 			file: `kind: Service
@@ -86,7 +86,7 @@ metadata:
   name: hej
   asdf: wasd
 `,
-			errors: []validationError{
+			errors: []ValidationError{
 				{
 					Range: newRange(4, 2, 4, 6),
 					Type:  "additional_property_not_allowed",
@@ -105,7 +105,7 @@ metadata:
   name: hej
   asdf: hej
 `,
-			errors: []validationError{
+			errors: []ValidationError{
 				{
 					Range: newRange(9, 2, 9, 6),
 					Type:  "additional_property_not_allowed",
@@ -116,7 +116,7 @@ metadata:
 			file: `got punched for no: {}
 reason
 `,
-			errors: []validationError{
+			errors: []ValidationError{
 				{
 					Range: newRange(0, 0, 2, 0),
 					Type:  "invalid_yaml",
@@ -255,11 +255,11 @@ var types string
 func TestSchemaDocs(t *testing.T) {
 	tests := map[string]struct {
 		schema string
-		docs   schemaProperties
+		docs   []SchemaProperty
 	}{
 		"simple": {
 			schema: `{"type": "object", "properties": {"name": {"type": "string", "description": "The name of the person"}}}`,
-			docs: schemaProperties{
+			docs: []SchemaProperty{
 				{
 					Path:        "name",
 					Description: "The name of the person",
@@ -272,7 +272,7 @@ func TestSchemaDocs(t *testing.T) {
 					"name":    {"type": "string",  "description": "The name of the person"},
 					"riddler": {"type": "boolean", "description": "riddle-riddle-riddle-riddle-riddle-diddle-diddle"}
 				}}`,
-			docs: schemaProperties{
+			docs: []SchemaProperty{
 				{
 					Path:        "name",
 					Description: "The name of the person",
@@ -295,7 +295,7 @@ func TestSchemaDocs(t *testing.T) {
 						}
 					}}
 				}}`,
-			docs: schemaProperties{
+			docs: []SchemaProperty{
 				{
 					Path:        "tonyz",
 					Description: "Tony Zarets",
@@ -315,7 +315,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"oneOf": {
 			schema: oneOf,
-			docs: schemaProperties{
+			docs: []SchemaProperty{
 				{
 					Path:        "port",
 					Description: "The port of the service",
@@ -335,7 +335,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"anyOf": {
 			schema: anyOf,
-			docs: schemaProperties{
+			docs: []SchemaProperty{
 				{
 					Path:        "port",
 					Description: "The port of the service",
@@ -355,7 +355,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"const": {
 			schema: const_,
-			docs: schemaProperties{
+			docs: []SchemaProperty{
 				{
 					Path:        "kind",
 					Description: "The service kind",
@@ -365,7 +365,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"enum": {
 			schema: enum,
-			docs: schemaProperties{
+			docs: []SchemaProperty{
 				{
 					Path:        "level",
 					Description: "The log level",
@@ -375,7 +375,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"x-kubernetes-preserve-unknown-fields": {
 			schema: xKubernetesPreserveUnknownFields,
-			docs: schemaProperties{
+			docs: []SchemaProperty{
 				{
 					Path:        "anything",
 					Description: "An object that can be anything",
@@ -385,7 +385,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"types": {
 			schema: types,
-			docs: schemaProperties{
+			docs: []SchemaProperty{
 				{
 					Path:        "port",
 					Description: "The port of the service",
