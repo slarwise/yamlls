@@ -8,6 +8,7 @@ require (
 	github.com/goccy/go-yaml v1.18.0
 	github.com/xeipuuv/gojsonschema v1.2.0
 	go.lsp.dev/protocol v0.12.0
+	go.lsp.dev/uri v0.3.0
 )
 
 require (
@@ -22,7 +23,6 @@ require (
 )
 
 require (
-	go.lsp.dev/uri v0.3.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 )

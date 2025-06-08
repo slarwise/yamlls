@@ -7,8 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 
 	"github.com/slarwise/yamlls/internal/lsp"
 	"github.com/slarwise/yamlls/pkg/schema2"
@@ -137,18 +135,18 @@ func main() {
 			return nil, err
 		}
 		contents := filenameToContents[params.TextDocument.URI.Filename()]
-		description, err := getDescription(contents, int(params.Position.Line), int(params.Position.Character), kubernetesStore)
+		documentation, err := kubernetesStore.DocumentationAtCursor(contents, int(params.Position.Line), int(params.Position.Character))
 		if err != nil {
 			logger.Error("failed to get description", "line", params.Position.Line, "char", params.Position.Character, "err", err)
 			return nil, nil
-		} else if description == "" {
+		} else if documentation.Description == "" {
 			return nil, nil
 		}
 
 		return protocol.Hover{
 			Contents: protocol.MarkupContent{
 				Kind:  protocol.PlainText,
-				Value: description,
+				Value: documentation.Description,
 			},
 		}, nil
 	})
@@ -170,10 +168,16 @@ func main() {
 			return nil, err
 		}
 		contents := filenameToContents[params.TextDocument.URI.Filename()]
-		htmlDocsUri, err := createHtmlDocs(contents, int(params.Range.Start.Line), int(params.Range.Start.Character), kubernetesStore, yamllsCacheDir)
-		if err != nil {
-			return nil, errors.New("not found")
+		documentation, found := kubernetesStore.HtmlDocumentation(contents, int(params.Range.Start.Line), int(params.Range.Start.Character))
+		if !found {
+			return "", errors.New("no schema found")
 		}
+		filename := filepath.Join(cacheDir, "docs.html")
+		if err := os.WriteFile(filename, []byte(documentation), 0755); err != nil {
+			slog.Error("write html documentation to file", "err", err, "file", filename)
+			return "", errors.New("failed to write docs to file")
+		}
+		htmlDocsUri := "file://" + filename
 		response := []protocol.CodeAction{
 			{
 				Title: "Open documentation",
@@ -227,19 +231,19 @@ func main() {
 	os.Exit(1)
 }
 
-func validateFile(contents string, store schema2.Store) ([]protocol.Diagnostic, error) {
-	errors := schema2.ValidateFile(contents, store)
+func validateFile(contents string, store schema2.KubernetesStore) ([]protocol.Diagnostic, error) {
+	errors := store.ValidateFile(contents)
 	diagnostics := []protocol.Diagnostic{}
 	for _, e := range errors {
 		diagnostics = append(diagnostics, protocol.Diagnostic{
 			Range: protocol.Range{
 				Start: protocol.Position{
-					Line:      uint32(e.Position.LineStart),
-					Character: uint32(e.Position.CharStart),
+					Line:      uint32(e.Range.Start.Line),
+					Character: uint32(e.Range.Start.Char),
 				},
 				End: protocol.Position{
-					Line:      uint32(e.Position.LineEnd),
-					Character: uint32(e.Position.CharEnd),
+					Line:      uint32(e.Range.End.Line),
+					Character: uint32(e.Range.End.Char),
 				},
 			},
 			Severity: protocol.DiagnosticSeverityError,
@@ -248,87 +252,4 @@ func validateFile(contents string, store schema2.Store) ([]protocol.Diagnostic, 
 		})
 	}
 	return diagnostics, nil
-}
-
-var arrayPath = regexp.MustCompile(`\.\d+`)
-
-func getDescription(contents string, line, char int, store schema2.Store) (string, error) {
-	ranges := schema2.GetDocumentPositions(contents)
-	var maybeValidDocument string
-	for _, r := range ranges {
-		if r.Start <= line && line < r.End {
-			lines := strings.FieldsFunc(contents, func(r rune) bool { return r == '\n' })
-			maybeValidDocument = strings.Join(lines[r.Start:r.End], "\n")
-			line = line - r.Start
-		}
-	}
-	if maybeValidDocument == "" {
-		return "", fmt.Errorf("cursor is not inside a document")
-	}
-	document, valid := schema2.NewYamlDocument(maybeValidDocument)
-	if !valid {
-		return "", fmt.Errorf("current yaml document is invalid")
-	}
-	paths := document.Paths()
-	path, found := paths.AtCursor(line, char)
-	if !found {
-		// Happens if the cursor is not on a field or on an empty space
-		return "", fmt.Errorf("No yaml path found at position %d:%d. Paths: %v", line, char, paths)
-	}
-	schema, schemaFound := store.Get(string(document))
-	if !schemaFound {
-		return "", fmt.Errorf("no schema found for current document")
-	}
-	// Turn spec.ports.0.name into spec.ports[].name
-	path = arrayPath.ReplaceAllString(path, "[]")
-	pathFound := false
-	var description string
-	documentation := schema.Docs()
-	for _, property := range documentation {
-		if property.Path == path {
-			description = property.Description
-			pathFound = true
-		}
-	}
-	if !pathFound {
-		return "", fmt.Errorf("could not find path %s in documentation", path)
-	}
-	return description, nil
-}
-
-func createHtmlDocs(contents string, line, char int, store schema2.Store, cacheDir string) (string, error) {
-	ranges := schema2.GetDocumentPositions(contents)
-	var maybeValidDocument string
-	for _, r := range ranges {
-		if r.Start <= line && line < r.End {
-			lines := strings.FieldsFunc(contents, func(r rune) bool { return r == '\n' })
-			maybeValidDocument = strings.Join(lines[r.Start:r.End], "\n")
-			line = line - r.Start
-		}
-	}
-	if maybeValidDocument == "" {
-		return "", fmt.Errorf("cursor is not on inside a document")
-	}
-	var pathAtCursor string
-	document, valid := schema2.NewYamlDocument(maybeValidDocument)
-	if valid {
-		paths := document.Paths()
-		var found bool
-		pathAtCursor, found = paths.AtCursor(line, char)
-		if found {
-			// Turn spec.ports.0.name into spec.ports[].name
-			pathAtCursor = arrayPath.ReplaceAllString(pathAtCursor, "[]")
-		}
-	}
-
-	schema, schemaFound := store.Get(string(document))
-	if !schemaFound {
-		return "", fmt.Errorf("no schema found for current document")
-	}
-	htmlDocs := schema.HtmlDocs(pathAtCursor)
-	docsPath := filepath.Join(cacheDir, "docs.html")
-	if err := os.WriteFile(docsPath, []byte(htmlDocs), 0755); err != nil {
-		return "", fmt.Errorf("write html documentation to file: %v", err)
-	}
-	return "file://" + docsPath, nil
 }

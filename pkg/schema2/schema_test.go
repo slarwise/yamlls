@@ -2,26 +2,71 @@ package schema2
 
 import (
 	_ "embed"
-	"strings"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/xeipuuv/gojsonschema"
 )
 
-type SimpleStore struct{}
+//go:embed testdata/service-v1.json
+var service []byte
 
-func (s SimpleStore) Get(contents string) (Schema, bool) {
-	if strings.HasPrefix(contents, `kind: Service
-apiVersion: v1`) {
-		return Schema{
-			loader: gojsonschema.NewReferenceLoader("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/refs/heads/master/master-standalone-strict/service-v1.json"),
-		}, true
-	} else {
-		return Schema{}, false
-	}
-}
 func TestValidateFile(t *testing.T) {
+	githubServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/yannh/kubernetes-json-schema/master/master-standalone-strict/_definitions.json":
+			resp := map[string]any{
+				"definitions": map[string]any{
+					"io.k8s.api.core.v1.Service": map[string]any{
+						"x-kubernetes-group-version-kind": []map[string]string{
+							{
+								"group":   "",
+								"kind":    "Service",
+								"version": "v1",
+							},
+						},
+					},
+				},
+			}
+			bytes, err := json.Marshal(resp)
+			if err != nil {
+				panic(fmt.Sprintf("failed to marshal definitions response: %v", err))
+			}
+			_, _ = w.Write(bytes)
+		case "/datreeio/CRDs-catalog/refs/heads/main/index.yaml":
+			resp := map[string]any{
+				"aadpodidentity.k8s.io": []any{
+					map[string]string{
+						"apiVersion": "aadpodidentity.k8s.io/v1",
+						"filename":   "aadpodidentity.k8s.io/azureidentity_v1.json",
+						"kind":       "AzureIdentity",
+						"name":       "azureidentity_v1",
+					},
+				},
+			}
+			bytes, err := yaml.Marshal(resp)
+			if err != nil {
+				panic(fmt.Sprintf("failed to marshal index response: %v", err))
+			}
+			_, _ = w.Write(bytes)
+		case "/yannh/kubernetes-json-schema/master/master-standalone-strict/service-v1.json":
+			_, _ = w.Write(service)
+		default:
+			w.WriteHeader(404)
+		}
+	}))
 
+	defer githubServer.Close()
+	setGithubRawContentsHost(githubServer.URL)
+
+	store, err := NewKubernetesStore()
+	if err != nil {
+		t.Fatalf("create kubernetes store: %v", err)
+	}
 	tests := map[string]struct {
 		file   string
 		errors []ValidationError
@@ -43,13 +88,8 @@ metadata:
 `,
 			errors: []ValidationError{
 				{
-					Position: Position{
-						LineStart: 4,
-						LineEnd:   4,
-						CharStart: 2,
-						CharEnd:   6,
-					},
-					Type: "additional_property_not_allowed",
+					Range: newRange(4, 2, 4, 6),
+					Type:  "additional_property_not_allowed",
 				},
 			},
 		},
@@ -67,13 +107,8 @@ metadata:
 `,
 			errors: []ValidationError{
 				{
-					Position: Position{
-						LineStart: 9,
-						LineEnd:   9,
-						CharStart: 2,
-						CharEnd:   6,
-					},
-					Type: "additional_property_not_allowed",
+					Range: newRange(9, 2, 9, 6),
+					Type:  "additional_property_not_allowed",
 				},
 			},
 		},
@@ -83,13 +118,8 @@ reason
 `,
 			errors: []ValidationError{
 				{
-					Position: Position{
-						LineStart: 0,
-						LineEnd:   2,
-						CharStart: 0,
-						CharEnd:   0,
-					},
-					Type: "invalid_yaml",
+					Range: newRange(0, 0, 2, 0),
+					Type:  "invalid_yaml",
 				},
 			},
 		},
@@ -102,14 +132,14 @@ apiVersion: 1990
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			errors := ValidateFile(test.file, SimpleStore{})
+			errors := store.ValidateFile(test.file)
 			if len(errors) != len(test.errors) {
 				t.Fatalf("Expected %d errors, got %v", len(test.errors), errors)
 			}
 			for i, e := range errors {
 				expected := test.errors[i]
-				if e.Position != expected.Position {
-					t.Fatalf("expected error at position `%v`, got `%v`", expected.Position, e.Position)
+				if e.Range != expected.Range {
+					t.Fatalf("expected error at position `%v`, got `%v`", expected.Range, e.Range)
 				}
 				if e.Type != expected.Type {
 					t.Fatalf("Expected type `%s`, got `%s`", expected.Type, e.Type)
@@ -122,16 +152,16 @@ apiVersion: 1990
 func TestGetDocumentPositions(t *testing.T) {
 	tests := map[string]struct {
 		file   string
-		ranges []LineRange
+		ranges []lineRange
 	}{
 		"one-doc": {
 			file: `hej: du
 `,
-			ranges: []LineRange{{0, 1}},
+			ranges: []lineRange{{0, 1}},
 		},
 		"one-doc-no-trailing-new-line": {
 			file:   `hej: du`,
-			ranges: []LineRange{{0, 1}},
+			ranges: []lineRange{{0, 1}},
 		},
 		"two-docs": {
 			file: `hej: du
@@ -141,7 +171,7 @@ arvid: hej
 what-if: the joker
 was: blue
 `,
-			ranges: []LineRange{
+			ranges: []lineRange{
 				{0, 2},
 				{3, 6},
 			},
@@ -149,7 +179,7 @@ was: blue
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			ranges := GetDocumentPositions(test.file)
+			ranges := getDocumentPositions(test.file)
 			if len(ranges) != len(test.ranges) {
 				t.Fatalf("Expected %d ranges, got %d", test.ranges, ranges)
 			}
@@ -166,7 +196,7 @@ func TestSchemaValidate(t *testing.T) {
 	tests := map[string]struct {
 		schema string
 		doc    yamlDocument
-		errors []JsonValidationError
+		errors []jsonValidationError
 	}{
 		"valid": {
 			schema: `{"type": "object", "properties": {"name": {"type": "string"}}}`,
@@ -176,7 +206,7 @@ func TestSchemaValidate(t *testing.T) {
 		"one-error": {
 			schema: `{"type": "object", "properties": {"name": {"type": "string"}}}`,
 			doc:    "name: 1",
-			errors: []JsonValidationError{
+			errors: []jsonValidationError{
 				{
 					Field: "name",
 					Type:  "invalid_type",
@@ -186,8 +216,8 @@ func TestSchemaValidate(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			s := Schema{gojsonschema.NewStringLoader(test.schema)}
-			errors := s.Validate(test.doc)
+			s := schema{gojsonschema.NewStringLoader(test.schema)}
+			errors := s.validate(test.doc)
 			if len(errors) != len(test.errors) {
 				t.Fatalf("Expected %d errors, got %v", len(test.errors), errors)
 			}
@@ -225,11 +255,11 @@ var types string
 func TestSchemaDocs(t *testing.T) {
 	tests := map[string]struct {
 		schema string
-		docs   SchemaDocs
+		docs   []SchemaProperty
 	}{
 		"simple": {
 			schema: `{"type": "object", "properties": {"name": {"type": "string", "description": "The name of the person"}}}`,
-			docs: SchemaDocs{
+			docs: []SchemaProperty{
 				{
 					Path:        "name",
 					Description: "The name of the person",
@@ -242,7 +272,7 @@ func TestSchemaDocs(t *testing.T) {
 					"name":    {"type": "string",  "description": "The name of the person"},
 					"riddler": {"type": "boolean", "description": "riddle-riddle-riddle-riddle-riddle-diddle-diddle"}
 				}}`,
-			docs: SchemaDocs{
+			docs: []SchemaProperty{
 				{
 					Path:        "name",
 					Description: "The name of the person",
@@ -265,7 +295,7 @@ func TestSchemaDocs(t *testing.T) {
 						}
 					}}
 				}}`,
-			docs: SchemaDocs{
+			docs: []SchemaProperty{
 				{
 					Path:        "tonyz",
 					Description: "Tony Zarets",
@@ -285,7 +315,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"oneOf": {
 			schema: oneOf,
-			docs: SchemaDocs{
+			docs: []SchemaProperty{
 				{
 					Path:        "port",
 					Description: "The port of the service",
@@ -305,7 +335,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"anyOf": {
 			schema: anyOf,
-			docs: SchemaDocs{
+			docs: []SchemaProperty{
 				{
 					Path:        "port",
 					Description: "The port of the service",
@@ -325,7 +355,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"const": {
 			schema: const_,
-			docs: SchemaDocs{
+			docs: []SchemaProperty{
 				{
 					Path:        "kind",
 					Description: "The service kind",
@@ -335,7 +365,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"enum": {
 			schema: enum,
-			docs: SchemaDocs{
+			docs: []SchemaProperty{
 				{
 					Path:        "level",
 					Description: "The log level",
@@ -345,7 +375,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"x-kubernetes-preserve-unknown-fields": {
 			schema: xKubernetesPreserveUnknownFields,
-			docs: SchemaDocs{
+			docs: []SchemaProperty{
 				{
 					Path:        "anything",
 					Description: "An object that can be anything",
@@ -355,7 +385,7 @@ func TestSchemaDocs(t *testing.T) {
 		},
 		"types": {
 			schema: types,
-			docs: SchemaDocs{
+			docs: []SchemaProperty{
 				{
 					Path:        "port",
 					Description: "The port of the service",
@@ -366,7 +396,7 @@ func TestSchemaDocs(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			s := Schema{loader: gojsonschema.NewStringLoader(test.schema)}
+			s := schema{loader: gojsonschema.NewStringLoader(test.schema)}
 			docs := s.Docs()
 			t.Log(docs)
 			if len(docs) != len(test.docs) {
@@ -391,7 +421,7 @@ func TestSchemaDocs(t *testing.T) {
 func TestDocumentPaths(t *testing.T) {
 	tests := map[string]struct {
 		document yamlDocument
-		paths    Paths
+		paths    paths
 	}{
 		"array": {
 			document: `spec:
@@ -401,55 +431,15 @@ func TestDocumentPaths(t *testing.T) {
     - port: 80
       name: http
 `,
-			paths: Paths{
-				"spec": Position{
-					LineStart: 0,
-					LineEnd:   0,
-					CharStart: 0,
-					CharEnd:   4,
-				},
-				"spec.ports": Position{
-					LineStart: 1,
-					LineEnd:   1,
-					CharStart: 2,
-					CharEnd:   7,
-				},
-				"spec.ports.0": Position{
-					LineStart: 2,
-					LineEnd:   2,
-					CharStart: 4,
-					CharEnd:   5,
-				},
-				"spec.ports.0.port": Position{
-					LineStart: 2,
-					LineEnd:   2,
-					CharStart: 6,
-					CharEnd:   10,
-				},
-				"spec.ports.0.name": Position{
-					LineStart: 3,
-					LineEnd:   3,
-					CharStart: 6,
-					CharEnd:   10,
-				},
-				"spec.ports.1": Position{
-					LineStart: 4,
-					LineEnd:   4,
-					CharStart: 4,
-					CharEnd:   5,
-				},
-				"spec.ports.1.port": Position{
-					LineStart: 4,
-					LineEnd:   4,
-					CharStart: 6,
-					CharEnd:   10,
-				},
-				"spec.ports.1.name": Position{
-					LineStart: 5,
-					LineEnd:   5,
-					CharStart: 6,
-					CharEnd:   10,
-				},
+			paths: paths{
+				"spec":              newRange(0, 0, 0, 4),
+				"spec.ports":        newRange(1, 2, 1, 7),
+				"spec.ports.0":      newRange(2, 4, 2, 5),
+				"spec.ports.0.port": newRange(2, 6, 2, 10),
+				"spec.ports.0.name": newRange(3, 6, 3, 10),
+				"spec.ports.1":      newRange(4, 4, 4, 5),
+				"spec.ports.1.port": newRange(4, 6, 4, 10),
+				"spec.ports.1.name": newRange(5, 6, 5, 10),
 			},
 		},
 	}

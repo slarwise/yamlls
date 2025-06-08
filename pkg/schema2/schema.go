@@ -1,6 +1,7 @@
 package schema2
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -12,49 +13,54 @@ import (
 	"github.com/xeipuuv/gojsonschema"
 )
 
-// -------------------------------------
-// FILES - COLLECTIONS OF YAML DOCUMENTS
-// -------------------------------------
-func ValidateFile(file string, store Store) []ValidationError {
+func (s KubernetesStore) ValidateFile(file string) []ValidationError {
 	lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
-	positions := GetDocumentPositions(file)
+	positions := getDocumentPositions(file)
 	var errors []ValidationError
 	for _, docPos := range positions {
 		contents := strings.Join(lines[docPos.Start:docPos.End], "\n")
-		doc, ok := NewYamlDocument(contents)
+		doc, ok := newYamlDocument(contents)
 		if !ok {
 			errors = append(errors, ValidationError{
-				Position: Position{
-					LineStart: docPos.Start,
-					LineEnd:   docPos.End,
-					CharStart: 0,
-					CharEnd:   0,
+				Range: Range_{
+					Start: Position{
+						Line: docPos.Start,
+						Char: 0,
+					},
+					End: Position{
+						Line: docPos.End,
+						Char: 0,
+					},
 				},
 				Message: "invalid yaml",
 				Type:    "invalid_yaml",
 			})
 			continue
 		}
-		schema, found := store.Get(contents)
+		schema, found := s.get(contents)
 		if !found {
 			continue
 		}
-		schemaErrors := schema.Validate(doc)
+		schemaErrors := schema.validate(doc)
 		if len(schemaErrors) == 0 {
 			continue
 		}
 		paths := doc.Paths()
-		for _, e := range schema.Validate(doc) {
-			p, found := paths[e.Field]
+		for _, e := range schema.validate(doc) {
+			r, found := paths[e.Field]
 			if !found {
 				panic(fmt.Sprintf("expected path `%s` to exist in the document. Available paths: %v. Error type: %s", e.Field, paths, e.Type))
 			}
 			errors = append(errors, ValidationError{
-				Position: Position{
-					LineStart: docPos.Start + p.LineStart,
-					LineEnd:   docPos.Start + p.LineEnd,
-					CharStart: p.CharStart,
-					CharEnd:   p.CharEnd,
+				Range: Range_{
+					Start: Position{
+						Line: docPos.Start + r.Start.Line,
+						Char: r.Start.Char,
+					},
+					End: Position{
+						Line: docPos.Start + r.End.Line,
+						Char: r.End.Char,
+					},
 				},
 				Message: e.Message,
 				Type:    e.Type, // I've got life!
@@ -65,25 +71,34 @@ func ValidateFile(file string, store Store) []ValidationError {
 }
 
 type ValidationError struct {
-	Position Position
-	Message  string
-	Type     string
+	Range   Range_
+	Message string
+	Type    string
 }
-type Position struct{ LineStart, LineEnd, CharStart, CharEnd int } // [LineStart, LineEnd], [CharStart, CharEnd), 0-indexed
 
-func GetDocumentPositions(file string) []LineRange {
-	var ranges []LineRange
+type Range_ struct{ Start, End Position } // zero-based, the start character is inclusive and the end character is exclusive
+type Position struct{ Line, Char int }    // zero-based
+
+func newRange(startLine, startChar, endLine, endChar int) Range_ {
+	return Range_{
+		Start: Position{Line: startLine, Char: startChar},
+		End:   Position{Line: endLine, Char: endChar},
+	}
+}
+
+func getDocumentPositions(file string) []lineRange {
+	var ranges []lineRange
 	startLine := 0
 	lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
 	for i, line := range lines {
 		if line == "---" {
-			ranges = append(ranges, LineRange{
+			ranges = append(ranges, lineRange{
 				Start: startLine,
 				End:   i,
 			})
 			startLine = i + 1
 		} else if i == len(lines)-1 {
-			ranges = append(ranges, LineRange{
+			ranges = append(ranges, lineRange{
 				Start: startLine,
 				End:   i + 1,
 			})
@@ -92,17 +107,13 @@ func GetDocumentPositions(file string) []LineRange {
 	return ranges
 }
 
-type LineRange struct{ Start, End int } // [Start, End), 0-indexed
-
-// --------------
-// YAML DOCUMENTS
-// --------------
+type lineRange struct{ Start, End int } // [Start, End), 0-indexed
 
 // yamlDocument is a valid yaml document
 type yamlDocument string
 
 // Returns "", false if the contents is not valid yaml
-func NewYamlDocument(contents string) (yamlDocument, bool) {
+func newYamlDocument(contents string) (yamlDocument, bool) {
 	var throwaway map[string]any
 	if err := yaml.Unmarshal([]byte(contents), &throwaway); err != nil {
 		return "", false
@@ -110,7 +121,7 @@ func NewYamlDocument(contents string) (yamlDocument, bool) {
 	return yamlDocument(contents), true
 }
 
-func (d yamlDocument) Paths() Paths {
+func (d yamlDocument) Paths() paths {
 	astFile, err := yamlparser.ParseBytes([]byte(d), 0)
 	if err != nil {
 		panic(fmt.Sprintf("expected a valid yaml document: %v", err))
@@ -118,12 +129,12 @@ func (d yamlDocument) Paths() Paths {
 	if len(astFile.Docs) != 1 {
 		panic(fmt.Sprintf("expected 1 document, got %d", len(astFile.Docs)))
 	}
-	paths := Paths{}
+	paths := paths{}
 	ast.Walk(&paths, astFile.Docs[0])
 	return paths
 }
 
-type Paths map[string]Position
+type paths map[string]Range_
 
 var (
 	arrayPattern          = regexp.MustCompile(`\[(\d+)\]`)
@@ -131,7 +142,7 @@ var (
 	endingIndexInBrackets = regexp.MustCompile(`\[(\d+)\]$`)
 )
 
-func (p Paths) Visit(node ast.Node) ast.Visitor {
+func (p paths) Visit(node ast.Node) ast.Visitor {
 	if node.Type() == ast.MappingValueType || node.Type() == ast.DocumentType {
 		return p
 	}
@@ -149,15 +160,19 @@ func (p Paths) Visit(node ast.Node) ast.Visitor {
 		var char int
 		for existingPath, pos := range p {
 			if existingPath == parent {
-				char = pos.CharStart + 2 // NOTE: Assuming that lists are indented here
+				char = pos.Start.Char + 2 // NOTE: Assuming that lists are indented here
 			}
 		}
 		t := node.GetToken()
-		p[path] = Position{
-			LineStart: t.Position.Line - 1,
-			LineEnd:   t.Position.Line - 1,
-			CharStart: char,
-			CharEnd:   char + 1,
+		p[path] = Range_{
+			Start: Position{
+				Line: t.Position.Line - 1,
+				Char: char,
+			},
+			End: Position{
+				Line: t.Position.Line - 1,
+				Char: char + 1,
+			},
 		}
 		return p
 	}
@@ -170,32 +185,32 @@ func (p Paths) Visit(node ast.Node) ast.Visitor {
 		return p
 	}
 	t := node.GetToken()
-	p[path] = Position{
-		LineStart: t.Position.Line - 1,
-		LineEnd:   t.Position.Line - 1,
-		CharStart: t.Position.Column - 1,
-		CharEnd:   t.Position.Column + len(t.Value) - 1,
+	p[path] = Range_{
+		Start: Position{
+			Line: t.Position.Line - 1,
+			Char: t.Position.Column - 1,
+		},
+		End: Position{
+			Line: t.Position.Line - 1,
+			Char: t.Position.Column + len(t.Value) - 1,
+		},
 	}
 	return p
 }
 
-func (p Paths) AtCursor(line, char int) (string, bool) {
-	for path, pos := range p {
-		if pos.LineStart == line && pos.CharStart <= char && char < pos.CharEnd {
+func (p paths) AtCursor(line, char int) (string, bool) {
+	for path, r := range p {
+		if r.Start.Line == line && r.Start.Char <= char && char < r.End.Char {
 			return path, true
 		}
 	}
 	return "", false
 }
 
-// ------------
-// JSON SCHEMAS
-// ------------
+type schema struct{ loader gojsonschema.JSONLoader }
 
-type Schema struct{ loader gojsonschema.JSONLoader }
-
-func (s *Schema) Fill() string { panic("todo") }
-func (s *Schema) Docs() SchemaDocs {
+func (s *schema) Fill() string { panic("todo") }
+func (s *schema) Docs() []SchemaProperty {
 	json, err := s.loader.LoadJSON()
 	if err != nil {
 		panic(fmt.Sprintf("expected schema to be valid json, got %v", err))
@@ -205,13 +220,15 @@ func (s *Schema) Docs() SchemaDocs {
 		panic(fmt.Sprintf("expected schema to be a map[string]any, got %T", json))
 	}
 	docs := walkSchemaDocs("", json_)
-	slices.SortFunc(docs, func(a, b Property) int {
+	slices.SortFunc(docs, func(a, b SchemaProperty) int {
 		return strings.Compare(a.Path, b.Path)
 	})
 	return docs
 }
 
-func (s *Schema) HtmlDocs(highlightProperty string) string {
+// Send in an empty string for highlightProperty to not go to
+// the property when opening it in a browser
+func (s *schema) HtmlDocs(highlightProperty string) string {
 	docs := s.Docs()
 	output := strings.Builder{}
 	fmt.Fprint(&output, `<!DOCTYPE html>
@@ -255,8 +272,7 @@ func (s *Schema) HtmlDocs(highlightProperty string) string {
 	return output.String()
 }
 
-type SchemaDocs []Property
-type Property struct {
+type SchemaProperty struct {
 	Path, Description, Type string
 	Required                bool
 }
@@ -287,8 +303,8 @@ type Property struct {
 // port?1.name    The port name    string
 
 // TODO: Support $ref keyword
-func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
-	var docs SchemaDocs
+func walkSchemaDocs(path string, schema map[string]any) []SchemaProperty {
+	var docs []SchemaProperty
 	var desc string
 	if d, found := schema["description"]; found {
 		desc = d.(string)
@@ -318,7 +334,7 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 			typeString = fmt.Sprintf("[%s]", strings.Join(types, ", "))
 		}
 		if path != "" {
-			docs = append(docs, Property{
+			docs = append(docs, SchemaProperty{
 				Path:        path,
 				Description: desc,
 				Type:        typeString,
@@ -393,7 +409,7 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 				panic(fmt.Sprintf("expected oneOf to be []any, got %T", choices_))
 			}
 			if path != "" {
-				docs = append(docs, Property{
+				docs = append(docs, SchemaProperty{
 					Path:        path,
 					Description: desc,
 					Type:        choiceType,
@@ -412,7 +428,7 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 
 	if _, found := schema["const"]; found {
 		if path != "" {
-			docs = append(docs, Property{
+			docs = append(docs, SchemaProperty{
 				Path:        path,
 				Description: desc,
 				Type:        "const",
@@ -423,7 +439,7 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 
 	if _, found := schema["enum"]; found {
 		if path != "" {
-			docs = append(docs, Property{
+			docs = append(docs, SchemaProperty{
 				Path:        path,
 				Description: desc,
 				Type:        "enum",
@@ -434,7 +450,7 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 
 	if _, found := schema["x-kubernetes-preserve-unknown-fields"]; found {
 		if path != "" {
-			docs = append(docs, Property{
+			docs = append(docs, SchemaProperty{
 				Path:        path,
 				Description: desc,
 				Type:        "object",
@@ -446,9 +462,9 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 	panic(fmt.Sprintf("schema not supported %v", schema))
 }
 
-type JsonValidationError struct{ Field, Message, Type string }
+type jsonValidationError struct{ Field, Message, Type string }
 
-func (s *Schema) Validate(d yamlDocument) []JsonValidationError {
+func (s *schema) validate(d yamlDocument) []jsonValidationError {
 	jsonDocument, err := yaml.YAMLToJSON([]byte(d))
 	if err != nil {
 		panic(fmt.Sprintf("expected the yaml document to be convertable to json, got %v", err))
@@ -458,17 +474,107 @@ func (s *Schema) Validate(d yamlDocument) []JsonValidationError {
 	if err != nil {
 		panic(fmt.Sprintf("expected both schema and document to be valid, got %v", err))
 	}
-	var errors []JsonValidationError
+	var errors []jsonValidationError
 	for _, e := range res.Errors() {
 		field := e.Field()
 		if e.Type() == "additional_property_not_allowed" {
 			field = e.Field() + "." + e.Details()["property"].(string)
 		}
-		errors = append(errors, JsonValidationError{
+		errors = append(errors, jsonValidationError{
 			Field:   field,
 			Message: e.Description(),
 			Type:    e.Type(),
 		})
 	}
 	return errors
+}
+
+var arrayPath = regexp.MustCompile(`\.\d+`)
+
+// Documentation in html format, with the focus placed on line and char.
+// Does anyone want another format?
+func (s KubernetesStore) HtmlDocumentation(file string, line int, char int) (string, bool) {
+	ranges := getDocumentPositions(file)
+	var maybeValidDocument string
+	for _, r := range ranges {
+		if r.Start <= line && line < r.End {
+			lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
+			maybeValidDocument = strings.Join(lines[r.Start:r.End], "\n")
+			line = line - r.Start
+		}
+	}
+	if maybeValidDocument == "" {
+		return "", false
+	}
+	var pathAtCursor string
+	document, valid := newYamlDocument(maybeValidDocument)
+	if valid {
+		paths := document.Paths()
+		var found bool
+		pathAtCursor, found = paths.AtCursor(line, char)
+		if found {
+			// Turn spec.ports.0.name into spec.ports[].name
+			pathAtCursor = arrayPath.ReplaceAllString(pathAtCursor, "[]")
+		}
+	}
+	schema, schemaFound := s.get(string(document))
+	if !schemaFound {
+		return "", false
+	}
+	return schema.HtmlDocs(pathAtCursor), true
+}
+
+type Error error
+
+var (
+	ErrSchemaNotFound         Error = errors.New("schema not found")
+	ErrPathNotFound           Error = errors.New("path not found")
+	ErrInvalidDocument        Error = errors.New("invalid document")
+	ErrDocumentNotFound       Error = errors.New("document not found")
+	ErrNoDocumentationForPath Error = errors.New("no documentation for path")
+)
+
+func (s KubernetesStore) DocumentationAtCursor(file string, line, char int) (SchemaProperty, Error) {
+	ranges := getDocumentPositions(file)
+	var maybeValidDocument string
+	for _, r := range ranges {
+		if r.Start <= line && line < r.End {
+			lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
+			maybeValidDocument = strings.Join(lines[r.Start:r.End], "\n")
+			line = line - r.Start
+		}
+	}
+	if maybeValidDocument == "" {
+		return SchemaProperty{}, ErrDocumentNotFound
+	}
+	document, valid := newYamlDocument(maybeValidDocument)
+	if !valid {
+		return SchemaProperty{}, ErrInvalidDocument
+	}
+	paths := document.Paths()
+	path, found := paths.AtCursor(line, char)
+	if !found {
+		// Happens if the cursor is not on a field or on an empty space
+		return SchemaProperty{}, ErrPathNotFound
+	}
+	schema, schemaFound := s.get(string(document))
+	if !schemaFound {
+		return SchemaProperty{}, ErrSchemaNotFound
+	}
+	// Turn spec.ports.0.name into spec.ports[].name
+	path = arrayPath.ReplaceAllString(path, "[]")
+	pathFound := false
+	properties := schema.Docs()
+	var property SchemaProperty
+	for _, p := range properties {
+		if p.Path == path {
+			property = p
+			pathFound = true
+			break
+		}
+	}
+	if !pathFound {
+		return SchemaProperty{}, ErrNoDocumentationForPath
+	}
+	return property, nil
 }

@@ -12,9 +12,11 @@ import (
 	"github.com/xeipuuv/gojsonschema"
 )
 
-type Store interface {
-	Get(string) (Schema, bool)
-}
+var githubRawContentsHost = "https://raw.githubusercontent.com"
+
+// Used for testing only to mock the github calls
+// Must be called before calling NewKubernetesStore()
+func setGithubRawContentsHost(host string) { githubRawContentsHost = host }
 
 func NewKubernetesStore() (KubernetesStore, error) {
 	db, err := setupKubernetesDatabase()
@@ -28,13 +30,13 @@ type KubernetesStore struct {
 	db kubernetesDb
 }
 
-func (s KubernetesStore) Get(contents string) (Schema, bool) {
+func (s KubernetesStore) get(contents string) (schema, bool) {
 	kind, apiVersion := findKindAndApiVersion(contents)
 	key := buildKubernetesKey(kind, apiVersion)
 	if schema, found := s.db[key]; found {
 		return schema, true
 	}
-	return Schema{}, false
+	return schema{}, false
 }
 
 var (
@@ -60,7 +62,7 @@ func findKindAndApiVersion(contents string) (string, string) {
 	return kind, apiVersion
 }
 
-type kubernetesDb map[string]Schema
+type kubernetesDb map[string]schema
 
 func setupKubernetesDatabase() (kubernetesDb, error) {
 	db := kubernetesDb{}
@@ -76,34 +78,34 @@ func setupKubernetesDatabase() (kubernetesDb, error) {
 	allResources := append(nativeResources, crds...)
 	for _, resource := range allResources {
 		key := buildKubernetesKey(resource.Kind, resource.ApiVersion)
-		db[key] = Schema{loader: gojsonschema.NewReferenceLoader(resource.Url)}
+		db[key] = schema{loader: gojsonschema.NewReferenceLoader(resource.Url)}
 	}
 	return db, nil
 }
 
-type Resource struct{ Kind, ApiVersion, Url string }
+type resource struct{ Kind, ApiVersion, Url string }
 
-type DefinitionsResponse struct {
-	Definitions map[string]Definition `json:"definitions"`
+type definitionsResponse struct {
+	Definitions map[string]definition `json:"definitions"`
 }
 
-type Definition struct {
-	GVK []GroupVersionKind `json:"x-kubernetes-group-version-kind,omitempty"`
+type definition struct {
+	GVK []groupVersionKind `json:"x-kubernetes-group-version-kind,omitempty"`
 }
 
-type GroupVersionKind struct {
+type groupVersionKind struct {
 	Group   string `json:"group"`
 	Version string `json:"version"`
 	Kind    string `json:"kind"`
 }
 
-func getNativeResourceDefinitions() ([]Resource, error) {
-	definitionsUrl := "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/_definitions.json"
-	var resp DefinitionsResponse
+func getNativeResourceDefinitions() ([]resource, error) {
+	definitionsUrl := githubRawContentsHost + "/yannh/kubernetes-json-schema/master/master-standalone-strict/_definitions.json"
+	var resp definitionsResponse
 	if err := getJson(definitionsUrl, &resp); err != nil {
 		return nil, fmt.Errorf("get definitions in yannh/kubernetes-json-schema: %v", err)
 	}
-	var resources []Resource
+	var resources []resource
 	for _, d := range resp.Definitions {
 		if d.GVK != nil {
 			gvk := d.GVK[0]
@@ -118,8 +120,8 @@ func getNativeResourceDefinitions() ([]Resource, error) {
 				apiVersion = fmt.Sprintf("%s/%s", group, version)
 				basename = fmt.Sprintf("%s-%s-%s.json", strings.ToLower(kind), group, version)
 			}
-			url := fmt.Sprintf("https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/%s", basename)
-			resources = append(resources, Resource{
+			url := fmt.Sprintf("%s/yannh/kubernetes-json-schema/master/master-standalone-strict/%s", githubRawContentsHost, basename)
+			resources = append(resources, resource{
 				Kind:       kind,
 				ApiVersion: apiVersion,
 				Url:        url,
@@ -129,8 +131,8 @@ func getNativeResourceDefinitions() ([]Resource, error) {
 	return resources, nil
 }
 
-func getCustomResourceDefinitions() ([]Resource, error) {
-	indexUrl := "https://raw.githubusercontent.com/datreeio/CRDs-catalog/refs/heads/main/index.yaml"
+func getCustomResourceDefinitions() ([]resource, error) {
+	indexUrl := githubRawContentsHost + "/datreeio/CRDs-catalog/refs/heads/main/index.yaml"
 	var index map[string][]struct {
 		Kind       string `yaml:"kind"`
 		ApiVersion string `yaml:"apiVersion"`
@@ -139,13 +141,13 @@ func getCustomResourceDefinitions() ([]Resource, error) {
 	if err := getYaml(indexUrl, &index); err != nil {
 		return nil, fmt.Errorf("get index: %v", err)
 	}
-	var allCrds []Resource
+	var allCrds []resource
 	for _, crds := range index {
 		for _, crd := range crds {
-			allCrds = append(allCrds, Resource{
+			allCrds = append(allCrds, resource{
 				Kind:       crd.Kind,
 				ApiVersion: crd.ApiVersion,
-				Url:        fmt.Sprintf("https://raw.githubusercontent.com/datreeio/CRDs-catalog/refs/heads/main/%s", crd.Filename),
+				Url:        fmt.Sprintf("%s/datreeio/CRDs-catalog/refs/heads/main/%s", githubRawContentsHost, crd.Filename),
 			})
 		}
 	}
