@@ -195,7 +195,7 @@ func (p Paths) AtCursor(line, char int) (string, bool) {
 type Schema struct{ loader gojsonschema.JSONLoader }
 
 func (s *Schema) Fill() string { panic("todo") }
-func (s *Schema) Docs() SchemaDocs {
+func (s *Schema) Docs() SchemaProperties {
 	json, err := s.loader.LoadJSON()
 	if err != nil {
 		panic(fmt.Sprintf("expected schema to be valid json, got %v", err))
@@ -205,7 +205,7 @@ func (s *Schema) Docs() SchemaDocs {
 		panic(fmt.Sprintf("expected schema to be a map[string]any, got %T", json))
 	}
 	docs := walkSchemaDocs("", json_)
-	slices.SortFunc(docs, func(a, b Property) int {
+	slices.SortFunc(docs, func(a, b SchemaProperty) int {
 		return strings.Compare(a.Path, b.Path)
 	})
 	return docs
@@ -255,8 +255,8 @@ func (s *Schema) HtmlDocs(highlightProperty string) string {
 	return output.String()
 }
 
-type SchemaDocs []Property
-type Property struct {
+type SchemaProperties []SchemaProperty
+type SchemaProperty struct {
 	Path, Description, Type string
 	Required                bool
 }
@@ -287,8 +287,8 @@ type Property struct {
 // port?1.name    The port name    string
 
 // TODO: Support $ref keyword
-func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
-	var docs SchemaDocs
+func walkSchemaDocs(path string, schema map[string]any) SchemaProperties {
+	var docs SchemaProperties
 	var desc string
 	if d, found := schema["description"]; found {
 		desc = d.(string)
@@ -318,7 +318,7 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 			typeString = fmt.Sprintf("[%s]", strings.Join(types, ", "))
 		}
 		if path != "" {
-			docs = append(docs, Property{
+			docs = append(docs, SchemaProperty{
 				Path:        path,
 				Description: desc,
 				Type:        typeString,
@@ -393,7 +393,7 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 				panic(fmt.Sprintf("expected oneOf to be []any, got %T", choices_))
 			}
 			if path != "" {
-				docs = append(docs, Property{
+				docs = append(docs, SchemaProperty{
 					Path:        path,
 					Description: desc,
 					Type:        choiceType,
@@ -412,7 +412,7 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 
 	if _, found := schema["const"]; found {
 		if path != "" {
-			docs = append(docs, Property{
+			docs = append(docs, SchemaProperty{
 				Path:        path,
 				Description: desc,
 				Type:        "const",
@@ -423,7 +423,7 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 
 	if _, found := schema["enum"]; found {
 		if path != "" {
-			docs = append(docs, Property{
+			docs = append(docs, SchemaProperty{
 				Path:        path,
 				Description: desc,
 				Type:        "enum",
@@ -434,7 +434,7 @@ func walkSchemaDocs(path string, schema map[string]any) SchemaDocs {
 
 	if _, found := schema["x-kubernetes-preserve-unknown-fields"]; found {
 		if path != "" {
-			docs = append(docs, Property{
+			docs = append(docs, SchemaProperty{
 				Path:        path,
 				Description: desc,
 				Type:        "object",
@@ -471,4 +471,21 @@ func (s *Schema) Validate(d yamlDocument) []JsonValidationError {
 		})
 	}
 	return errors
+}
+
+type Error int
+
+const (
+	ErrSchemaNotFound Error = iota
+	ErrPathNotFound
+)
+
+// Documentation in html format
+// Does anyone want another format?
+func HtmlDocumentation(file string, line int, store Store) (string, bool) {
+	panic("not implemented")
+}
+
+func DocumentationAtCursor(file string, line, char int, store Store) (SchemaProperty, Error) {
+	panic("not implemented")
 }

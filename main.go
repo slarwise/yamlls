@@ -170,7 +170,7 @@ func main() {
 			return nil, err
 		}
 		contents := filenameToContents[params.TextDocument.URI.Filename()]
-		htmlDocsUri, err := createHtmlDocs(contents, int(params.Range.Start.Line), int(params.Range.Start.Character), kubernetesStore, yamllsCacheDir)
+		htmlDocsUri, err := createHtmlDocs(contents, int(params.Range.Start.Line), kubernetesStore, yamllsCacheDir)
 		if err != nil {
 			return nil, errors.New("not found")
 		}
@@ -253,82 +253,24 @@ func validateFile(contents string, store schema2.Store) ([]protocol.Diagnostic, 
 var arrayPath = regexp.MustCompile(`\.\d+`)
 
 func getDescription(contents string, line, char int, store schema2.Store) (string, error) {
-	ranges := schema2.GetDocumentPositions(contents)
-	var maybeValidDocument string
-	for _, r := range ranges {
-		if r.Start <= line && line < r.End {
-			lines := strings.FieldsFunc(contents, func(r rune) bool { return r == '\n' })
-			maybeValidDocument = strings.Join(lines[r.Start:r.End], "\n")
-			line = line - r.Start
-		}
+	documentation, err := schema2.DocumentationAtCursor(contents, line, char, store)
+	switch err {
+	case schema2.ErrSchemaNotFound:
+		return "", fmt.Errorf("schema not found")
+	case schema2.ErrPathNotFound:
+		return "", fmt.Errorf("no property found under cursor")
 	}
-	if maybeValidDocument == "" {
-		return "", fmt.Errorf("cursor is not inside a document")
-	}
-	document, valid := schema2.NewYamlDocument(maybeValidDocument)
-	if !valid {
-		return "", fmt.Errorf("current yaml document is invalid")
-	}
-	paths := document.Paths()
-	path, found := paths.AtCursor(line, char)
-	if !found {
-		// Happens if the cursor is not on a field or on an empty space
-		return "", fmt.Errorf("No yaml path found at position %d:%d. Paths: %v", line, char, paths)
-	}
-	schema, schemaFound := store.Get(string(document))
-	if !schemaFound {
-		return "", fmt.Errorf("no schema found for current document")
-	}
-	// Turn spec.ports.0.name into spec.ports[].name
-	path = arrayPath.ReplaceAllString(path, "[]")
-	pathFound := false
-	var description string
-	documentation := schema.Docs()
-	for _, property := range documentation {
-		if property.Path == path {
-			description = property.Description
-			pathFound = true
-		}
-	}
-	if !pathFound {
-		return "", fmt.Errorf("could not find path %s in documentation", path)
-	}
-	return description, nil
+	return documentation.Description, nil
 }
 
-func createHtmlDocs(contents string, line, char int, store schema2.Store, cacheDir string) (string, error) {
-	ranges := schema2.GetDocumentPositions(contents)
-	var maybeValidDocument string
-	for _, r := range ranges {
-		if r.Start <= line && line < r.End {
-			lines := strings.FieldsFunc(contents, func(r rune) bool { return r == '\n' })
-			maybeValidDocument = strings.Join(lines[r.Start:r.End], "\n")
-			line = line - r.Start
-		}
+func createHtmlDocs(contents string, line int, store schema2.Store, cacheDir string) (string, error) {
+	documentation, found := schema2.HtmlDocumentation(contents, line, store)
+	if !found {
+		return "", fmt.Errorf("no schema found")
 	}
-	if maybeValidDocument == "" {
-		return "", fmt.Errorf("cursor is not on inside a document")
-	}
-	var pathAtCursor string
-	document, valid := schema2.NewYamlDocument(maybeValidDocument)
-	if valid {
-		paths := document.Paths()
-		var found bool
-		pathAtCursor, found = paths.AtCursor(line, char)
-		if found {
-			// Turn spec.ports.0.name into spec.ports[].name
-			pathAtCursor = arrayPath.ReplaceAllString(pathAtCursor, "[]")
-		}
-	}
-
-	schema, schemaFound := store.Get(string(document))
-	if !schemaFound {
-		return "", fmt.Errorf("no schema found for current document")
-	}
-	htmlDocs := schema.HtmlDocs(pathAtCursor)
-	docsPath := filepath.Join(cacheDir, "docs.html")
-	if err := os.WriteFile(docsPath, []byte(htmlDocs), 0755); err != nil {
+	filename := filepath.Join(cacheDir, "docs.html")
+	if err := os.WriteFile(filename, []byte(documentation), 0755); err != nil {
 		return "", fmt.Errorf("write html documentation to file: %v", err)
 	}
-	return "file://" + docsPath, nil
+	return "file://" + filename, nil
 }
