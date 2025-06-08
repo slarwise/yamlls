@@ -236,6 +236,8 @@ func (s *Schema) Docs() SchemaProperties {
 	return docs
 }
 
+// Send in an empty string for highlightProperty to not go to
+// the property when opening it in a browser
 func (s *Schema) HtmlDocs(highlightProperty string) string {
 	docs := s.Docs()
 	output := strings.Builder{}
@@ -505,10 +507,39 @@ const (
 	ErrPathNotFound
 )
 
-// Documentation in html format
+var arrayPath = regexp.MustCompile(`\.\d+`)
+
+// Documentation in html format, with the focus placed on line and char
 // Does anyone want another format?
-func HtmlDocumentation(file string, line int, store Store) (string, bool) {
-	panic("not implemented")
+func HtmlDocumentation(file string, line int, char int, store Store) (string, bool) {
+	ranges := GetDocumentPositions(file)
+	var maybeValidDocument string
+	for _, r := range ranges {
+		if r.Start <= line && line < r.End {
+			lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
+			maybeValidDocument = strings.Join(lines[r.Start:r.End], "\n")
+			line = line - r.Start
+		}
+	}
+	if maybeValidDocument == "" {
+		return "", false
+	}
+	var pathAtCursor string
+	document, valid := NewYamlDocument(maybeValidDocument)
+	if valid {
+		paths := document.Paths()
+		var found bool
+		pathAtCursor, found = paths.AtCursor(line, char)
+		if found {
+			// Turn spec.ports.0.name into spec.ports[].name
+			pathAtCursor = arrayPath.ReplaceAllString(pathAtCursor, "[]")
+		}
+	}
+	schema, schemaFound := store.Get(string(document))
+	if !schemaFound {
+		return "", false
+	}
+	return schema.HtmlDocs(pathAtCursor), true
 }
 
 func DocumentationAtCursor(file string, line, char int, store Store) (SchemaProperty, Error) {

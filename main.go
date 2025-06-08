@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 
 	"github.com/slarwise/yamlls/internal/lsp"
 	"github.com/slarwise/yamlls/pkg/schema2"
@@ -169,10 +168,16 @@ func main() {
 			return nil, err
 		}
 		contents := filenameToContents[params.TextDocument.URI.Filename()]
-		htmlDocsUri, err := createHtmlDocs(contents, int(params.Range.Start.Line), kubernetesStore, yamllsCacheDir)
-		if err != nil {
-			return nil, errors.New("not found")
+		documentation, found := schema2.HtmlDocumentation(contents, int(params.Range.Start.Line), int(params.Range.Start.Character), kubernetesStore)
+		if !found {
+			return "", errors.New("no schema found")
 		}
+		filename := filepath.Join(cacheDir, "docs.html")
+		if err := os.WriteFile(filename, []byte(documentation), 0755); err != nil {
+			slog.Error("write html documentation to file", "err", err, "file", filename)
+			return "", errors.New("failed to write docs to file")
+		}
+		htmlDocsUri := "file://" + filename
 		response := []protocol.CodeAction{
 			{
 				Title: "Open documentation",
@@ -249,8 +254,6 @@ func validateFile(contents string, store schema2.Store) ([]protocol.Diagnostic, 
 	return diagnostics, nil
 }
 
-var arrayPath = regexp.MustCompile(`\.\d+`)
-
 func getDescription(contents string, line, char int, store schema2.Store) (string, error) {
 	documentation, err := schema2.DocumentationAtCursor(contents, line, char, store)
 	switch err {
@@ -260,16 +263,4 @@ func getDescription(contents string, line, char int, store schema2.Store) (strin
 		return "", fmt.Errorf("no property found under cursor")
 	}
 	return documentation.Description, nil
-}
-
-func createHtmlDocs(contents string, line int, store schema2.Store, cacheDir string) (string, error) {
-	documentation, found := schema2.HtmlDocumentation(contents, line, store)
-	if !found {
-		return "", fmt.Errorf("no schema found")
-	}
-	filename := filepath.Join(cacheDir, "docs.html")
-	if err := os.WriteFile(filename, []byte(documentation), 0755); err != nil {
-		return "", fmt.Errorf("write html documentation to file: %v", err)
-	}
-	return "file://" + filename, nil
 }
