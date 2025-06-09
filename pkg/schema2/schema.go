@@ -13,7 +13,7 @@ import (
 	"github.com/xeipuuv/gojsonschema"
 )
 
-func (s KubernetesStore) ValidateFile(file string) []ValidationError {
+func (s KubernetesStore) ValidateFile(file, filename string) []ValidationError {
 	lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
 	positions := getDocumentPositions(file)
 	var errors []ValidationError
@@ -493,7 +493,7 @@ var arrayPath = regexp.MustCompile(`\.\d+`)
 
 // Documentation in html format, with the focus placed on line and char.
 // Does anyone want another format?
-func (s KubernetesStore) HtmlDocumentation(file string, line int, char int) (string, bool) {
+func (s KubernetesStore) HtmlDocumentation(file, filename string, line int, char int) (string, bool) {
 	ranges := getDocumentPositions(file)
 	var maybeValidDocument string
 	for _, r := range ranges {
@@ -534,7 +534,7 @@ var (
 	ErrNoDocumentationForPath Error = errors.New("no documentation for path")
 )
 
-func (s KubernetesStore) DocumentationAtCursor(file string, line, char int) (SchemaProperty, Error) {
+func (s KubernetesStore) DocumentationAtCursor(file, filename string, line, char int) (SchemaProperty, Error) {
 	ranges := getDocumentPositions(file)
 	var maybeValidDocument string
 	for _, r := range ranges {

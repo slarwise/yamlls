@@ -68,8 +68,9 @@ func TestValidateFile(t *testing.T) {
 		t.Fatalf("create kubernetes store: %v", err)
 	}
 	tests := map[string]struct {
-		file   string
-		errors []ValidationError
+		file     string
+		errors   []ValidationError
+		filename string
 	}{
 		"valid": {
 			file: `kind: Service
@@ -132,7 +133,7 @@ apiVersion: 1990
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			errors := store.ValidateFile(test.file)
+			errors := store.ValidateFile(test.file, test.filename)
 			if len(errors) != len(test.errors) {
 				t.Fatalf("Expected %d errors, got %v", len(test.errors), errors)
 			}

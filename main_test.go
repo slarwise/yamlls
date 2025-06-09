@@ -17,6 +17,7 @@ func TestValidateFile(t *testing.T) {
 	tests := map[string]struct {
 		contents    string
 		diagnostics []protocol.Diagnostic
+		filename    string
 	}{
 		"valid": {
 			contents: `apiVersion: apps/v1
@@ -114,7 +115,7 @@ spec:
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			diagnostics, err := validateFile(test.contents, store)
+			diagnostics, err := validateFile(test.contents, test.filename, store)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
