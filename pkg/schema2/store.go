@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/goccy/go-yaml"
 	"github.com/xeipuuv/gojsonschema"
 )
@@ -33,7 +34,9 @@ type Store struct {
 }
 
 func (s Store) get(contents, filename string) (schema, bool) {
-	panic("todo: get schema from filename")
+	if schema, found := schemaFromFilename(s.fileMatchDb, filename); found {
+		return schema, true
+	}
 	kind, apiVersion := findKindAndApiVersion(contents)
 	key := buildKubernetesKey(kind, apiVersion)
 	if schema, found := s.kubernetesDb[key]; found {
@@ -200,7 +203,7 @@ func getYaml(url string, output any) error {
 }
 
 type fileMatchAndSchema struct {
-	fileMatch []string
+	fileMatch []string // glob expressions: https://github.com/SchemaStore/schemastore/blob/c474ddf1cfa44c149c1824aeaac1f602a1d961f8/src/schemas/json/schema-catalog.json#L20
 	schema    schema
 }
 
@@ -226,4 +229,16 @@ func setupFileMatchDb() (fileMatchDb, error) {
 		})
 	}
 	return fileMatchDb, nil
+}
+
+func schemaFromFilename(db fileMatchDb, filename string) (schema, bool) {
+	for _, entry := range db {
+		for _, fm := range entry.fileMatch {
+			// TODO: I used to check for exact matches on the basename first for some reason
+			if doublestar.MatchUnvalidated(fm, filename) {
+				return entry.schema, true
+			}
+		}
+	}
+	return schema{}, false
 }

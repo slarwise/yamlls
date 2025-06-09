@@ -5,6 +5,7 @@ go 1.23.0
 toolchain go1.24.3
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/goccy/go-yaml v1.18.0
 	github.com/xeipuuv/gojsonschema v1.2.0
 	go.lsp.dev/protocol v0.12.0
