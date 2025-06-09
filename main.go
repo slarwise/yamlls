@@ -35,7 +35,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	kubernetesStore, err := schema2.NewKubernetesStore()
+	kubernetesStore, err := schema2.NewStore()
 	if err != nil {
 		slog.Error("create kubernetes store", "err", err)
 		os.Exit(1)
@@ -96,7 +96,7 @@ func main() {
 	go func() {
 		for doc := range documentUpdates {
 			filenameToContents[doc.URI.Filename()] = doc.Text
-			diagnostics, err := validateFile(doc.Text, kubernetesStore)
+			diagnostics, err := validateFile(doc.Text, doc.URI.Filename(), kubernetesStore)
 			if err != nil {
 				logger.Error("validate file", "err", err)
 			}
@@ -135,7 +135,7 @@ func main() {
 			return nil, err
 		}
 		contents := filenameToContents[params.TextDocument.URI.Filename()]
-		documentation, err := kubernetesStore.DocumentationAtCursor(contents, int(params.Position.Line), int(params.Position.Character))
+		documentation, err := kubernetesStore.DocumentationAtCursor(contents, params.TextDocument.URI.Filename(), int(params.Position.Line), int(params.Position.Character))
 		if err != nil {
 			logger.Error("failed to get description", "line", params.Position.Line, "char", params.Position.Character, "err", err)
 			return nil, nil
@@ -168,7 +168,7 @@ func main() {
 			return nil, err
 		}
 		contents := filenameToContents[params.TextDocument.URI.Filename()]
-		documentation, found := kubernetesStore.HtmlDocumentation(contents, int(params.Range.Start.Line), int(params.Range.Start.Character))
+		documentation, found := kubernetesStore.HtmlDocumentation(contents, params.TextDocument.URI.Filename(), int(params.Range.Start.Line), int(params.Range.Start.Character))
 		if !found {
 			return "", errors.New("no schema found")
 		}
@@ -231,8 +231,8 @@ func main() {
 	os.Exit(1)
 }
 
-func validateFile(contents string, store schema2.KubernetesStore) ([]protocol.Diagnostic, error) {
-	errors := store.ValidateFile(contents)
+func validateFile(contents, filename string, store schema2.Store) ([]protocol.Diagnostic, error) {
+	errors := store.ValidateFile(contents, filename)
 	diagnostics := []protocol.Diagnostic{}
 	for _, e := range errors {
 		diagnostics = append(diagnostics, protocol.Diagnostic{

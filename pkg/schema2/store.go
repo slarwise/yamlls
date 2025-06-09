@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/goccy/go-yaml"
 	"github.com/xeipuuv/gojsonschema"
 )
@@ -15,22 +16,30 @@ import (
 // Change this when testing to http://localhost:<port>
 var githubRawContentsHost = "https://raw.githubusercontent.com"
 
-func NewKubernetesStore() (KubernetesStore, error) {
-	db, err := setupKubernetesDatabase()
+func NewStore() (Store, error) {
+	kubernetesDb, err := setupKubernetesDatabase()
 	if err != nil {
-		return KubernetesStore{}, fmt.Errorf("failed to setup database with kubernetes schemas: %v", err)
+		return Store{}, fmt.Errorf("failed to setup database with kubernetes schemas: %v", err)
 	}
-	return KubernetesStore{db: db}, nil
+	fileMatchDb, err := setupFileMatchDb()
+	if err != nil {
+		return Store{}, fmt.Errorf("failed to setup database with schemastore.org schemas: %v", err)
+	}
+	return Store{kubernetesDb: kubernetesDb, fileMatchDb: fileMatchDb}, nil
 }
 
-type KubernetesStore struct {
-	db kubernetesDb
+type Store struct {
+	kubernetesDb kubernetesDb
+	fileMatchDb  fileMatchDb
 }
 
-func (s KubernetesStore) get(contents string) (schema, bool) {
+func (s Store) get(contents, filename string) (schema, bool) {
+	if schema, found := schemaFromFilename(s.fileMatchDb, filename); found {
+		return schema, true
+	}
 	kind, apiVersion := findKindAndApiVersion(contents)
 	key := buildKubernetesKey(kind, apiVersion)
-	if schema, found := s.db[key]; found {
+	if schema, found := s.kubernetesDb[key]; found {
 		return schema, true
 	}
 	return schema{}, false
@@ -191,4 +200,45 @@ func getYaml(url string, output any) error {
 		return fmt.Errorf("unmarshal body: %v", err)
 	}
 	return nil
+}
+
+type fileMatchAndSchema struct {
+	fileMatch []string // glob expressions: https://github.com/SchemaStore/schemastore/blob/c474ddf1cfa44c149c1824aeaac1f602a1d961f8/src/schemas/json/schema-catalog.json#L20
+	schema    schema
+}
+
+type fileMatchDb []fileMatchAndSchema
+
+func setupFileMatchDb() (fileMatchDb, error) {
+	var catalog struct {
+		Schemas []struct {
+			FileMatch []string `json:"fileMatch"`
+			Url       string   `json:"url"`
+		} `json:"schemas"`
+	}
+	if err := getJson("https://www.schemastore.org/api/json/catalog.json", &catalog); err != nil {
+		return nil, fmt.Errorf("get available schemas at schemastore: %v", err)
+	}
+	var fileMatchDb fileMatchDb
+	for _, entry := range catalog.Schemas {
+		fileMatchDb = append(fileMatchDb, fileMatchAndSchema{
+			fileMatch: entry.FileMatch,
+			schema: schema{
+				loader: gojsonschema.NewReferenceLoader(entry.Url),
+			},
+		})
+	}
+	return fileMatchDb, nil
+}
+
+func schemaFromFilename(db fileMatchDb, filename string) (schema, bool) {
+	for _, entry := range db {
+		for _, fm := range entry.fileMatch {
+			// TODO: I used to check for exact matches on the basename first for some reason
+			if doublestar.MatchUnvalidated(fm, filename) {
+				return entry.schema, true
+			}
+		}
+	}
+	return schema{}, false
 }

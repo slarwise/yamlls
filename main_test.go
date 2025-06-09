@@ -10,13 +10,14 @@ import (
 // TODO: Not really a reason to test this since it just wraps
 // schema2.ValidateFile. Merge these tests with schema_test
 func TestValidateFile(t *testing.T) {
-	store, err := schema2.NewKubernetesStore()
+	store, err := schema2.NewStore()
 	if err != nil {
 		t.Fatalf("unexepcted error: %v", err)
 	}
 	tests := map[string]struct {
 		contents    string
 		diagnostics []protocol.Diagnostic
+		filename    string
 	}{
 		"valid": {
 			contents: `apiVersion: apps/v1
@@ -114,7 +115,7 @@ spec:
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			diagnostics, err := validateFile(test.contents, store)
+			diagnostics, err := validateFile(test.contents, test.filename, store)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

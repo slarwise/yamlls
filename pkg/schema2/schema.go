@@ -13,7 +13,7 @@ import (
 	"github.com/xeipuuv/gojsonschema"
 )
 
-func (s KubernetesStore) ValidateFile(file string) []ValidationError {
+func (s Store) ValidateFile(file, filename string) []ValidationError {
 	lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
 	positions := getDocumentPositions(file)
 	var errors []ValidationError
@@ -37,7 +37,7 @@ func (s KubernetesStore) ValidateFile(file string) []ValidationError {
 			})
 			continue
 		}
-		schema, found := s.get(contents)
+		schema, found := s.get(contents, filename)
 		if !found {
 			continue
 		}
@@ -493,7 +493,7 @@ var arrayPath = regexp.MustCompile(`\.\d+`)
 
 // Documentation in html format, with the focus placed on line and char.
 // Does anyone want another format?
-func (s KubernetesStore) HtmlDocumentation(file string, line int, char int) (string, bool) {
+func (s Store) HtmlDocumentation(file, filename string, line int, char int) (string, bool) {
 	ranges := getDocumentPositions(file)
 	var maybeValidDocument string
 	for _, r := range ranges {
@@ -517,7 +517,7 @@ func (s KubernetesStore) HtmlDocumentation(file string, line int, char int) (str
 			pathAtCursor = arrayPath.ReplaceAllString(pathAtCursor, "[]")
 		}
 	}
-	schema, schemaFound := s.get(string(document))
+	schema, schemaFound := s.get(string(document), filename)
 	if !schemaFound {
 		return "", false
 	}
@@ -534,7 +534,7 @@ var (
 	ErrNoDocumentationForPath Error = errors.New("no documentation for path")
 )
 
-func (s KubernetesStore) DocumentationAtCursor(file string, line, char int) (SchemaProperty, Error) {
+func (s Store) DocumentationAtCursor(file, filename string, line, char int) (SchemaProperty, Error) {
 	ranges := getDocumentPositions(file)
 	var maybeValidDocument string
 	for _, r := range ranges {
@@ -557,7 +557,7 @@ func (s KubernetesStore) DocumentationAtCursor(file string, line, char int) (Sch
 		// Happens if the cursor is not on a field or on an empty space
 		return SchemaProperty{}, ErrPathNotFound
 	}
-	schema, schemaFound := s.get(string(document))
+	schema, schemaFound := s.get(string(document), filename)
 	if !schemaFound {
 		return SchemaProperty{}, ErrSchemaNotFound
 	}
