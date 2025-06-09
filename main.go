@@ -35,7 +35,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	kubernetesStore, err := schema2.NewKubernetesStore()
+	kubernetesStore, err := schema2.NewStore()
 	if err != nil {
 		slog.Error("create kubernetes store", "err", err)
 		os.Exit(1)
@@ -231,7 +231,7 @@ func main() {
 	os.Exit(1)
 }
 
-func validateFile(contents, filename string, store schema2.KubernetesStore) ([]protocol.Diagnostic, error) {
+func validateFile(contents, filename string, store schema2.Store) ([]protocol.Diagnostic, error) {
 	errors := store.ValidateFile(contents, filename)
 	diagnostics := []protocol.Diagnostic{}
 	for _, e := range errors {

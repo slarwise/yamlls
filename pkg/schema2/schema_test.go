@@ -63,7 +63,7 @@ func TestValidateFile(t *testing.T) {
 	defer githubServer.Close()
 	githubRawContentsHost = githubServer.URL
 
-	store, err := NewKubernetesStore()
+	store, err := NewStore()
 	if err != nil {
 		t.Fatalf("create kubernetes store: %v", err)
 	}
