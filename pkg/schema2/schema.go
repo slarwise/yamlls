@@ -148,7 +148,7 @@ func (p paths) Visit(node ast.Node) ast.Visitor {
 	}
 	path := strings.TrimPrefix(node.GetPath(), "$.")
 	if path == "$" {
-		return p
+		path = "(root)" // TODO: Is (root) a good name?
 	}
 	path = arrayPattern.ReplaceAllString(path, ".$1")
 	if node.Type() == ast.MappingType && endingIndex.MatchString(path) {
