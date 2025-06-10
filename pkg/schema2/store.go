@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -234,11 +235,14 @@ func setupFileMatchDb() (fileMatchDb, error) {
 func schemaFromFilename(db fileMatchDb, filename string) (schema, bool) {
 	for _, entry := range db {
 		for _, fm := range entry.fileMatch {
-			// TODO: I used to check for exact matches on the basename first for some reason
-			if doublestar.MatchUnvalidated(fm, filename) {
+			if checkFileMatch(fm, filename) {
 				return entry.schema, true
 			}
 		}
 	}
 	return schema{}, false
+}
+
+func checkFileMatch(fileMatch, filename string) bool {
+	return filepath.Base(filename) == fileMatch || doublestar.MatchUnvalidated(fileMatch, filename)
 }

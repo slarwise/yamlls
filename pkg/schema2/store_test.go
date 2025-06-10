@@ -48,3 +48,40 @@ apiVersion: 'v1'
 		})
 	}
 }
+
+func TestFileMatch(t *testing.T) {
+	tests := map[string]struct {
+		fileMatch   string
+		filename    string
+		shouldMatch bool
+	}{
+		"simple-match": {
+			fileMatch:   ".prettierrc",
+			filename:    "/Users/tonyzaret/projects/thejoker/.prettierrc",
+			shouldMatch: true,
+		},
+		"simple-no-match": {
+			fileMatch:   "/Users/tonyzaret/projects/thejoker/.prettierrc",
+			filename:    ".vimrc",
+			shouldMatch: false,
+		},
+		"double-star-match": {
+			fileMatch:   "**/.dependabot/config.yml",
+			filename:    "/usr/collengreen/home/tvismyfriend/.dependabot/config.yml",
+			shouldMatch: true,
+		},
+		"double-star-no-match": {
+			fileMatch:   "**/.dependabot/config.yml",
+			filename:    "/usr/collengreen/home/tvismyfriend/and-it-has-been/config.yml",
+			shouldMatch: false,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			actual := checkFileMatch(test.fileMatch, test.filename)
+			if actual != test.shouldMatch {
+				t.Fatalf("expected %v, got %v", test.shouldMatch, actual)
+			}
+		})
+	}
+}

@@ -49,7 +49,7 @@ func (s Store) ValidateFile(file, filename string) []ValidationError {
 		for _, e := range schema.validate(doc) {
 			r, found := paths[e.Field]
 			if !found {
-				panic(fmt.Sprintf("expected path `%s` to exist in the document. Available paths: %v. Error type: %s", e.Field, paths, e.Type))
+				panic(fmt.Sprintf("expected path `%s` to exist in the document. Available paths: %v. Error type: %s. Message: %s", e.Field, paths, e.Type, e.Message))
 			}
 			errors = append(errors, ValidationError{
 				Range: Range{
@@ -177,7 +177,6 @@ func (p paths) Visit(node ast.Node) ast.Visitor {
 		return p
 	}
 	// Turn spec.ports[0].port into spec.ports.0.port
-	// path = arrayPattern.ReplaceAllString(path, ".$1")
 	if _, found := p[path]; found {
 		// Store the path to the key only, not the value
 		// Assumes that the key is always visited first, couldn't find a way to distinguish
@@ -503,6 +502,7 @@ func (s Store) HtmlDocumentation(file, filename string, line int, char int) (str
 			line = line - r.Start
 		}
 	}
+	// TODO: An empty document is valid to get docs for when getting schema based on filename
 	if maybeValidDocument == "" {
 		return "", false
 	}
