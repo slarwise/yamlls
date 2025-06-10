@@ -22,7 +22,7 @@ func (s Store) ValidateFile(file, filename string) []ValidationError {
 		doc, ok := newYamlDocument(contents)
 		if !ok {
 			errors = append(errors, ValidationError{
-				Range: Range_{
+				Range: Range{
 					Start: Position{
 						Line: docPos.Start,
 						Char: 0,
@@ -52,7 +52,7 @@ func (s Store) ValidateFile(file, filename string) []ValidationError {
 				panic(fmt.Sprintf("expected path `%s` to exist in the document. Available paths: %v. Error type: %s", e.Field, paths, e.Type))
 			}
 			errors = append(errors, ValidationError{
-				Range: Range_{
+				Range: Range{
 					Start: Position{
 						Line: docPos.Start + r.Start.Line,
 						Char: r.Start.Char,
@@ -71,16 +71,16 @@ func (s Store) ValidateFile(file, filename string) []ValidationError {
 }
 
 type ValidationError struct {
-	Range   Range_
+	Range   Range
 	Message string
 	Type    string
 }
 
-type Range_ struct{ Start, End Position } // zero-based, the start character is inclusive and the end character is exclusive
-type Position struct{ Line, Char int }    // zero-based
+type Range struct{ Start, End Position } // zero-based, the start character is inclusive and the end character is exclusive
+type Position struct{ Line, Char int }   // zero-based
 
-func newRange(startLine, startChar, endLine, endChar int) Range_ {
-	return Range_{
+func newRange(startLine, startChar, endLine, endChar int) Range {
+	return Range{
 		Start: Position{Line: startLine, Char: startChar},
 		End:   Position{Line: endLine, Char: endChar},
 	}
@@ -134,7 +134,7 @@ func (d yamlDocument) Paths() paths {
 	return paths
 }
 
-type paths map[string]Range_
+type paths map[string]Range
 
 var (
 	arrayPattern          = regexp.MustCompile(`\[(\d+)\]`)
@@ -164,7 +164,7 @@ func (p paths) Visit(node ast.Node) ast.Visitor {
 			}
 		}
 		t := node.GetToken()
-		p[path] = Range_{
+		p[path] = Range{
 			Start: Position{
 				Line: t.Position.Line - 1,
 				Char: char,
@@ -185,7 +185,7 @@ func (p paths) Visit(node ast.Node) ast.Visitor {
 		return p
 	}
 	t := node.GetToken()
-	p[path] = Range_{
+	p[path] = Range{
 		Start: Position{
 			Line: t.Position.Line - 1,
 			Char: t.Position.Column - 1,
