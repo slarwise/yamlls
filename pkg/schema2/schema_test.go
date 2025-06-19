@@ -398,7 +398,7 @@ func TestSchemaDocs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s := schema{loader: gojsonschema.NewStringLoader(test.schema)}
 			docs := s.Docs()
-			t.Log(docs)
+			t.Logf("%+v", docs)
 			if len(docs) != len(test.docs) {
 				t.Fatalf("Expected %d properties with documentation, got %v", len(test.docs), docs)
 			}

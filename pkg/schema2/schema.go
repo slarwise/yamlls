@@ -303,6 +303,7 @@ type SchemaProperty struct {
 // port?1.name    The port name    string
 
 // TODO: Support $ref keyword
+// TODO: Maybe the root should be `.` instead of any empty string
 func walkSchemaDocs(path string, schema map[string]any) []SchemaProperty {
 	var docs []SchemaProperty
 	var desc string
@@ -310,156 +311,135 @@ func walkSchemaDocs(path string, schema map[string]any) []SchemaProperty {
 		desc = d.(string)
 	}
 
-	type_, found := schema["type"]
-	if found {
-		var types []string
+	schemaTypes := schemaType(schema)
+	var typeString string
+	switch len(schemaTypes) {
+	case 0:
+		panic("schemaType() returned an empty list, this shouldn't happen")
+	case 1:
+		switch schemaTypes[0] {
+		case "object":
+			properties_, found := schema["properties"]
+			if !found {
+				break
+			}
+			properties, ok := properties_.(map[string]any)
+			if !ok {
+				panicf("expected properties to be map[string]any, got %T", properties_)
+			}
+			var requiredProperties []string
+			if required_, found := schema["required"]; found {
+				required, ok := required_.([]any)
+				if ok {
+					for _, p := range required {
+						requiredProperties = append(requiredProperties, p.(string))
+					}
+				}
+			}
+			for property, subSchema_ := range properties {
+				subSchema, ok := subSchema_.(map[string]any)
+				if !ok {
+					panicf("expected schema to be map[string]any, got %T", subSchema_)
+				}
+				subPath := property
+				if path != "" {
+					subPath = path + "." + property
+				}
+				subDocs := walkSchemaDocs(subPath, subSchema)
+				if slices.Contains(requiredProperties, property) {
+					subDocs[0].Required = true
+				}
+				docs = append(docs, subDocs...)
+			}
+			typeString = schemaTypes[0]
+		case "array":
+			items_, found := schema["items"]
+			if !found {
+				panic("expected an array to have items")
+			}
+			items, ok := items_.(map[string]any)
+			if !ok {
+				panicf("expected items to be map[string]any, got %T", items_)
+			}
+			subPath := "[]"
+			if path != "" {
+				subPath = path + "[]"
+			}
+			docs = append(docs, walkSchemaDocs(subPath, items)...)
+			typeString = schemaTypes[0]
+		case "oneOf", "anyOf":
+			typeString = schemaTypes[0]
+			if choices_, found := schema[typeString]; found {
+				choices, ok := choices_.([]any)
+				if !ok {
+					panicf("expected %s to be []any, got %T", typeString, choices)
+				}
+				for i, choice_ := range choices {
+					choice, ok := choice_.(map[string]any)
+					if !ok {
+						panicf("expected an %s element to be map[string], got %T", typeString, choice_)
+					}
+					docs = append(docs, walkSchemaDocs(fmt.Sprintf("%s?%d", path, i), choice)...)
+				}
+			}
+		case "x-kubernetes-preserve-unknown-fields":
+			typeString = "object"
+		default:
+			typeString = schemaTypes[0]
+		}
+	default:
+		typeString = "[" + strings.Join(schemaTypes, ", ") + "]"
+		if slices.Contains(schemaTypes, "object") {
+			panicf("multiple types containing `object` is not supported, got %v", schemaTypes)
+		} else if slices.Contains(schemaTypes, "array") {
+			panicf("multiple types containing `array` is not supported, got %v", schemaTypes)
+		}
+	}
+	if path != "" {
+		docs = append(docs, SchemaProperty{
+			Path:        path,
+			Description: desc,
+			Type:        typeString,
+		})
+	}
+	return docs
+}
+
+func panicf(format string, args ...any) {
+	panic(fmt.Sprintf(format, args...))
+}
+
+// The return value will have at least one element
+func schemaType(schema map[string]any) []string {
+	if type_, found := schema["type"]; found {
 		switch type_ := type_.(type) {
 		case string:
-			types = []string{type_}
+			return []string{type_}
 		case []any:
-			for _, t_ := range type_ {
-				t, ok := t_.(string)
-				if !ok {
-					panic(fmt.Sprintf("expected all elements in `type` to be a string, got %v", t_))
-				}
-				if t != "null" {
+			var types []string
+			for _, t := range type_ {
+				if t, ok := t.(string); ok {
 					types = append(types, t)
-				}
-			}
-		default:
-			panic(fmt.Sprintf("expected type to be a string or an array, got %v", type_))
-		}
-		typeString := types[0]
-		if len(types) > 1 {
-			typeString = fmt.Sprintf("[%s]", strings.Join(types, ", "))
-		}
-		if path != "" {
-			docs = append(docs, SchemaProperty{
-				Path:        path,
-				Description: desc,
-				Type:        typeString,
-			})
-		}
-		if len(types) == 1 {
-			switch types[0] {
-			case "object":
-				properties_, found := schema["properties"]
-				if !found {
-					break
-				}
-				properties, ok := properties_.(map[string]any)
-				if !ok {
-					panic(fmt.Sprintf("expected properties to be map[string]any, got %T", properties_))
-				}
-				var requiredProperties []string
-				if required_, found := schema["required"]; found {
-					required, ok := required_.([]any)
-					if ok {
-						for _, p := range required {
-							requiredProperties = append(requiredProperties, p.(string))
-						}
-					}
-				}
-				for property, subSchema_ := range properties {
-					subSchema, ok := subSchema_.(map[string]any)
-					if !ok {
-						panic(fmt.Sprintf("expected schema to be map[string]any, got %T", subSchema_))
-					}
-					var subPath string
-					if path == "" {
-						subPath = property
-					} else {
-						subPath = path + "." + property
-					}
-					subDocs := walkSchemaDocs(subPath, subSchema)
-					if slices.Contains(requiredProperties, property) {
-						subDocs[0].Required = true
-					}
-					docs = append(docs, subDocs...)
-				}
-			case "array":
-				items_, found := schema["items"]
-				if !found {
-					panic("expected an array to have items")
-				}
-				items, ok := items_.(map[string]any)
-				if !ok {
-					panic(fmt.Sprintf("expected items to be map[string]any, got %T", items_))
-				}
-				var subPath string
-				if path == "" {
-					subPath = "[]"
 				} else {
-					subPath = path + "[]"
+					panicf("expected type all elements in `type` to be strings, got %v", t)
 				}
-				docs = append(docs, walkSchemaDocs(subPath, items)...)
 			}
-		} else {
-			if slices.Contains(types, "object") || slices.Contains(types, "array") {
-				panic("multiple types containing object or array not supported")
-			}
+			return types
+		default:
+			panicf("expected type to be a string or an array, got %v", type_)
 		}
-		return docs
+	} else if _, found := schema["oneOf"]; found {
+		return []string{"oneOf"}
+	} else if _, found := schema["anyOf"]; found {
+		return []string{"anyOf"}
+	} else if _, found := schema["const"]; found {
+		return []string{"const"}
+	} else if _, found := schema["enum"]; found {
+		return []string{"enum"}
+	} else if _, found := schema["x-kubernetes-preserve-unknown-fields"]; found {
+		return []string{"x-kubernetes-preserve-unknown-fields"}
 	}
-
-	for _, choiceType := range []string{"oneOf", "anyOf"} {
-		if choices_, found := schema[choiceType]; found {
-			choices, ok := choices_.([]any)
-			if !ok {
-				panic(fmt.Sprintf("expected oneOf to be []any, got %T", choices_))
-			}
-			if path != "" {
-				docs = append(docs, SchemaProperty{
-					Path:        path,
-					Description: desc,
-					Type:        choiceType,
-				})
-			}
-			for i, choice_ := range choices {
-				choice, ok := choice_.(map[string]any)
-				if !ok {
-					panic(fmt.Sprintf("expected an anyOf or oneOf element to be map[string]any, got %T", choice_))
-				}
-				docs = append(docs, walkSchemaDocs(fmt.Sprintf("%s?%d", path, i), choice)...)
-			}
-			return docs
-		}
-	}
-
-	if _, found := schema["const"]; found {
-		if path != "" {
-			docs = append(docs, SchemaProperty{
-				Path:        path,
-				Description: desc,
-				Type:        "const",
-			})
-		}
-		return docs
-	}
-
-	if _, found := schema["enum"]; found {
-		if path != "" {
-			docs = append(docs, SchemaProperty{
-				Path:        path,
-				Description: desc,
-				Type:        "enum",
-			})
-		}
-		return docs
-	}
-
-	if _, found := schema["x-kubernetes-preserve-unknown-fields"]; found {
-		if path != "" {
-			docs = append(docs, SchemaProperty{
-				Path:        path,
-				Description: desc,
-				Type:        "object",
-			})
-		}
-		return docs
-	}
-
-	panic(fmt.Sprintf("schema not supported %v", schema))
+	panic(fmt.Sprintf("could not figure out the type of this schema: %v", schema))
 }
 
 type jsonValidationError struct{ Field, Message, Type string }
