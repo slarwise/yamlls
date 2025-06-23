@@ -252,6 +252,12 @@ var xKubernetesPreserveUnknownFields string
 //go:embed testdata/types.json
 var types string
 
+//go:embed testdata/refs.json
+var refs string
+
+//go:embed testdata/refs2.json
+var refs2 string
+
 func TestSchemaDocs(t *testing.T) {
 	tests := map[string]struct {
 		schema string
@@ -393,12 +399,32 @@ func TestSchemaDocs(t *testing.T) {
 				},
 			},
 		},
+		"refs": {
+			schema: refs,
+			docs: []SchemaProperty{
+				{
+					Path:        "name",
+					Description: "The name of the person",
+					Type:        "string",
+				},
+			},
+		},
+		"refs2": {
+			schema: refs,
+			docs: []SchemaProperty{
+				{
+					Path:        "name",
+					Description: "The name of the person",
+					Type:        "string",
+				},
+			},
+		},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			s := schema{loader: gojsonschema.NewStringLoader(test.schema)}
 			docs := s.Docs()
-			t.Log(docs)
+			t.Logf("%+v", docs)
 			if len(docs) != len(test.docs) {
 				t.Fatalf("Expected %d properties with documentation, got %v", len(test.docs), docs)
 			}
