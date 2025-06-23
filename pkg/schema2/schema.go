@@ -1,6 +1,7 @@
 package schema2
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -10,6 +11,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	yamlparser "github.com/goccy/go-yaml/parser"
+	"github.com/tidwall/gjson"
 	"github.com/xeipuuv/gojsonschema"
 )
 
@@ -211,15 +213,19 @@ type schema struct{ loader gojsonschema.JSONLoader }
 
 func (s *schema) Fill() string { panic("todo") }
 func (s *schema) Docs() []SchemaProperty {
-	json, err := s.loader.LoadJSON()
+	loadedSchema_, err := s.loader.LoadJSON()
 	if err != nil {
 		panic(fmt.Sprintf("expected schema to be valid json, got %v", err))
 	}
-	json_, ok := json.(map[string]any)
+	loadedSchema, ok := loadedSchema_.(map[string]any)
 	if !ok {
-		panic(fmt.Sprintf("expected schema to be a map[string]any, got %T", json))
+		panic(fmt.Sprintf("expected schema to be a map[string]any, got %T", loadedSchema_))
 	}
-	docs := walkSchemaDocs("", json_)
+	bytes, err := json.Marshal(loadedSchema_)
+	if err != nil {
+		panicf("marshal schema back to json: %v", err)
+	}
+	docs := walkSchemaDocs("", loadedSchema, bytes)
 	slices.SortFunc(docs, func(a, b SchemaProperty) int {
 		return strings.Compare(a.Path, b.Path)
 	})
@@ -302,9 +308,8 @@ type SchemaProperty struct {
 // port?1.number  The port number  integer
 // port?1.name    The port name    string
 
-// TODO: Support $ref keyword
 // TODO: Maybe the root should be `.` instead of any empty string
-func walkSchemaDocs(path string, schema map[string]any) []SchemaProperty {
+func walkSchemaDocs(path string, schema map[string]any, rootSchema []byte) []SchemaProperty {
 	var docs []SchemaProperty
 	var desc string
 	if d, found := schema["description"]; found {
@@ -345,7 +350,7 @@ func walkSchemaDocs(path string, schema map[string]any) []SchemaProperty {
 				if path != "" {
 					subPath = path + "." + property
 				}
-				subDocs := walkSchemaDocs(subPath, subSchema)
+				subDocs := walkSchemaDocs(subPath, subSchema, rootSchema)
 				if slices.Contains(requiredProperties, property) {
 					subDocs[0].Required = true
 				}
@@ -365,7 +370,7 @@ func walkSchemaDocs(path string, schema map[string]any) []SchemaProperty {
 			if path != "" {
 				subPath = path + "[]"
 			}
-			docs = append(docs, walkSchemaDocs(subPath, items)...)
+			docs = append(docs, walkSchemaDocs(subPath, items, rootSchema)...)
 			typeString = schemaTypes[0]
 		case "oneOf", "anyOf":
 			typeString = schemaTypes[0]
@@ -379,9 +384,31 @@ func walkSchemaDocs(path string, schema map[string]any) []SchemaProperty {
 					if !ok {
 						panicf("expected an %s element to be map[string], got %T", typeString, choice_)
 					}
-					docs = append(docs, walkSchemaDocs(fmt.Sprintf("%s?%d", path, i), choice)...)
+					docs = append(docs, walkSchemaDocs(fmt.Sprintf("%s?%d", path, i), choice, rootSchema)...)
 				}
 			}
+		case "$ref":
+			if _, found := schema["$ref"]; !found {
+				panicf("expected type $ref to have property $ref, got %+v", schema)
+			}
+			ref, ok := schema["$ref"].(string)
+			if !ok {
+				panicf("expected $ref to be a string, got %v", schema["$ref"])
+			}
+			if !strings.HasPrefix(ref, "#/") {
+				panicf("expected $ref to start with `#/`, got %s", ref)
+			}
+			refPath := strings.ReplaceAll(ref[2:], "/", ".")
+			res := gjson.GetBytes(rootSchema, refPath)
+			if !res.Exists() {
+				panicf("could not find the reference at path %s in the root schema %s", refPath, rootSchema)
+			}
+			refSchema, ok := res.Value().(map[string]any)
+			if !ok {
+				panicf("expected ref to point to an object")
+			}
+			docs = append(docs, walkSchemaDocs(path, refSchema, rootSchema)...)
+			return docs
 		case "x-kubernetes-preserve-unknown-fields":
 			typeString = "object"
 		default:
@@ -438,6 +465,8 @@ func schemaType(schema map[string]any) []string {
 		return []string{"enum"}
 	} else if _, found := schema["x-kubernetes-preserve-unknown-fields"]; found {
 		return []string{"x-kubernetes-preserve-unknown-fields"}
+	} else if _, found := schema["$ref"]; found {
+		return []string{"$ref"}
 	}
 	panic(fmt.Sprintf("could not figure out the type of this schema: %v", schema))
 }

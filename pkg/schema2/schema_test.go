@@ -252,6 +252,12 @@ var xKubernetesPreserveUnknownFields string
 //go:embed testdata/types.json
 var types string
 
+//go:embed testdata/refs.json
+var refs string
+
+//go:embed testdata/refs2.json
+var refs2 string
+
 func TestSchemaDocs(t *testing.T) {
 	tests := map[string]struct {
 		schema string
@@ -390,6 +396,26 @@ func TestSchemaDocs(t *testing.T) {
 					Path:        "port",
 					Description: "The port of the service",
 					Type:        "[string, integer]",
+				},
+			},
+		},
+		"refs": {
+			schema: refs,
+			docs: []SchemaProperty{
+				{
+					Path:        "name",
+					Description: "The name of the person",
+					Type:        "string",
+				},
+			},
+		},
+		"refs2": {
+			schema: refs,
+			docs: []SchemaProperty{
+				{
+					Path:        "name",
+					Description: "The name of the person",
+					Type:        "string",
 				},
 			},
 		},
