@@ -1,0 +1,23 @@
+{
+  "anyOf": [
+    {
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "description": "the name" }
+          }
+        },
+        {
+          "type": "object",
+          "properties": {
+            "created_at": {
+              "type": "integer",
+              "description": "when it was created"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

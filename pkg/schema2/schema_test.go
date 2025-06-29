@@ -258,6 +258,15 @@ var refs string
 //go:embed testdata/refs2.json
 var refs2 string
 
+//go:embed testdata/refs3.json
+var refs3 string
+
+//go:embed testdata/allOf.json
+var allOf string
+
+//go:embed testdata/anyOf-and-allOf.json
+var anyOfAndAllOf string
+
 func TestSchemaDocs(t *testing.T) {
 	tests := map[string]struct {
 		schema string
@@ -410,11 +419,51 @@ func TestSchemaDocs(t *testing.T) {
 			},
 		},
 		"refs2": {
-			schema: refs,
+			schema: refs2,
 			docs: []SchemaProperty{
 				{
 					Path:        "name",
 					Description: "The name of the person",
+					Type:        "string",
+				},
+			},
+		},
+		"refs3": {
+			schema: refs3,
+			docs: []SchemaProperty{
+				{
+					Path:        "name",
+					Description: "The name of the person",
+					Type:        "string",
+				},
+			},
+		},
+		"allOf": {
+			schema: allOf,
+			docs: []SchemaProperty{
+				{
+					Path:        "created_at",
+					Description: "when it was created",
+					Type:        "integer",
+				},
+				{
+					Path:        "name",
+					Description: "the name of the object",
+					Type:        "string",
+				},
+			},
+		},
+		"anyOfAndAllOf": {
+			schema: anyOfAndAllOf,
+			docs: []SchemaProperty{
+				{
+					Path:        "?0.created_at",
+					Description: "when it was created",
+					Type:        "integer",
+				},
+				{
+					Path:        "?0.name",
+					Description: "the name",
 					Type:        "string",
 				},
 			},
@@ -426,7 +475,7 @@ func TestSchemaDocs(t *testing.T) {
 			docs := s.Docs()
 			t.Logf("%+v", docs)
 			if len(docs) != len(test.docs) {
-				t.Fatalf("Expected %d properties with documentation, got %v", len(test.docs), docs)
+				t.Fatalf("Expected %d properties with documentation, got %+v", len(test.docs), docs)
 			}
 			for i, d := range docs {
 				expected := test.docs[i]

@@ -1,0 +1,18 @@
+{
+  "$ref": "https://localhost:8080/schemas#/definitions/Person",
+  "definitions": {
+    "Person": {
+      "description": "A person",
+      "properties": {
+        "name": {
+          "$ref": "#/definitions/Name"
+        }
+      },
+      "type": "object"
+    },
+    "Name": {
+      "type": "string",
+      "description": "The name of the person"
+    }
+  }
+}

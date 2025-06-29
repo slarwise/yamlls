@@ -309,6 +309,9 @@ type SchemaProperty struct {
 // port?1.name    The port name    string
 
 // TODO: Maybe the root should be `.` instead of any empty string
+
+var rootChoicePattern = regexp.MustCompile(`^\?\d+$`)
+
 func walkSchemaDocs(path string, schema map[string]any, rootSchema []byte) []SchemaProperty {
 	var docs []SchemaProperty
 	var desc string
@@ -387,6 +390,20 @@ func walkSchemaDocs(path string, schema map[string]any, rootSchema []byte) []Sch
 					docs = append(docs, walkSchemaDocs(fmt.Sprintf("%s?%d", path, i), choice, rootSchema)...)
 				}
 			}
+		case "allOf":
+			typeString = schemaTypes[0]
+			elements_ := schema[typeString]
+			elements, ok := elements_.([]any)
+			if !ok {
+				panicf("expected allOf to be []any, got %T", elements_)
+			}
+			for _, element_ := range elements {
+				element, ok := element_.(map[string]any)
+				if !ok {
+					panicf("expected an allOf element to be map[string]any, got %T", element_)
+				}
+				docs = append(docs, walkSchemaDocs(path, element, rootSchema)...)
+			}
 		case "$ref":
 			if _, found := schema["$ref"]; !found {
 				panicf("expected type $ref to have property $ref, got %+v", schema)
@@ -395,10 +412,9 @@ func walkSchemaDocs(path string, schema map[string]any, rootSchema []byte) []Sch
 			if !ok {
 				panicf("expected $ref to be a string, got %v", schema["$ref"])
 			}
-			if !strings.HasPrefix(ref, "#/") {
-				panicf("expected $ref to start with `#/`, got %s", ref)
-			}
-			refPath := strings.ReplaceAll(ref[2:], "/", ".")
+			// NOTE: We expect all references to be part of the same file
+			ref = strings.Split(ref, "#")[1]
+			refPath := strings.ReplaceAll(ref[1:], "/", ".")
 			res := gjson.GetBytes(rootSchema, refPath)
 			if !res.Exists() {
 				panicf("could not find the reference at path %s in the root schema %s", refPath, rootSchema)
@@ -417,12 +433,44 @@ func walkSchemaDocs(path string, schema map[string]any, rootSchema []byte) []Sch
 	default:
 		typeString = "[" + strings.Join(schemaTypes, ", ") + "]"
 		if slices.Contains(schemaTypes, "object") {
-			panicf("multiple types containing `object` is not supported, got %v", schemaTypes)
+			// TODO: Duplicate code with type == "object" above
+			properties_, found := schema["properties"]
+			if !found {
+				break
+			}
+			properties, ok := properties_.(map[string]any)
+			if !ok {
+				panicf("expected properties to be map[string]any, got %T", properties_)
+			}
+			var requiredProperties []string
+			if required_, found := schema["required"]; found {
+				required, ok := required_.([]any)
+				if ok {
+					for _, p := range required {
+						requiredProperties = append(requiredProperties, p.(string))
+					}
+				}
+			}
+			for property, subSchema_ := range properties {
+				subSchema, ok := subSchema_.(map[string]any)
+				if !ok {
+					panicf("expected schema to be map[string]any, got %T", subSchema_)
+				}
+				subPath := property
+				if path != "" {
+					subPath = path + "." + property
+				}
+				subDocs := walkSchemaDocs(subPath, subSchema, rootSchema)
+				if slices.Contains(requiredProperties, property) {
+					subDocs[0].Required = true
+				}
+				docs = append(docs, subDocs...)
+			}
 		} else if slices.Contains(schemaTypes, "array") {
 			panicf("multiple types containing `array` is not supported, got %v", schemaTypes)
 		}
 	}
-	if path != "" {
+	if path != "" && !rootChoicePattern.MatchString(path) {
 		docs = append(docs, SchemaProperty{
 			Path:        path,
 			Description: desc,
@@ -438,7 +486,24 @@ func panicf(format string, args ...any) {
 
 // The return value will have at least one element
 func schemaType(schema map[string]any) []string {
-	if type_, found := schema["type"]; found {
+	// Prioritize anyOf, oneOf, allOf over type: object
+	if _, found := schema["anyOf"]; found {
+		return []string{"anyOf"}
+	} else if _, found := schema["oneOf"]; found {
+		return []string{"oneOf"}
+	} else if _, found := schema["allOf"]; found {
+		return []string{"allOf"}
+	} else if _, found := schema["const"]; found {
+		return []string{"const"}
+	} else if _, found := schema["enum"]; found {
+		return []string{"enum"}
+	} else if _, found := schema["required"]; found {
+		return []string{"object"}
+	} else if _, found := schema["x-kubernetes-preserve-unknown-fields"]; found {
+		return []string{"x-kubernetes-preserve-unknown-fields"}
+	} else if _, found := schema["$ref"]; found {
+		return []string{"$ref"}
+	} else if type_, found := schema["type"]; found {
 		switch type_ := type_.(type) {
 		case string:
 			return []string{type_}
@@ -446,7 +511,9 @@ func schemaType(schema map[string]any) []string {
 			var types []string
 			for _, t := range type_ {
 				if t, ok := t.(string); ok {
-					types = append(types, t)
+					if t != "null" {
+						types = append(types, t)
+					}
 				} else {
 					panicf("expected type all elements in `type` to be strings, got %v", t)
 				}
@@ -455,18 +522,6 @@ func schemaType(schema map[string]any) []string {
 		default:
 			panicf("expected type to be a string or an array, got %v", type_)
 		}
-	} else if _, found := schema["oneOf"]; found {
-		return []string{"oneOf"}
-	} else if _, found := schema["anyOf"]; found {
-		return []string{"anyOf"}
-	} else if _, found := schema["const"]; found {
-		return []string{"const"}
-	} else if _, found := schema["enum"]; found {
-		return []string{"enum"}
-	} else if _, found := schema["x-kubernetes-preserve-unknown-fields"]; found {
-		return []string{"x-kubernetes-preserve-unknown-fields"}
-	} else if _, found := schema["$ref"]; found {
-		return []string{"$ref"}
 	}
 	panic(fmt.Sprintf("could not figure out the type of this schema: %v", schema))
 }
