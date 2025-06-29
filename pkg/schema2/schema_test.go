@@ -258,6 +258,9 @@ var refs string
 //go:embed testdata/refs2.json
 var refs2 string
 
+//go:embed testdata/refs3.json
+var refs3 string
+
 //go:embed testdata/allOf.json
 var allOf string
 
@@ -416,7 +419,17 @@ func TestSchemaDocs(t *testing.T) {
 			},
 		},
 		"refs2": {
-			schema: refs,
+			schema: refs2,
+			docs: []SchemaProperty{
+				{
+					Path:        "name",
+					Description: "The name of the person",
+					Type:        "string",
+				},
+			},
+		},
+		"refs3": {
+			schema: refs3,
 			docs: []SchemaProperty{
 				{
 					Path:        "name",

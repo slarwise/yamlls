@@ -412,10 +412,9 @@ func walkSchemaDocs(path string, schema map[string]any, rootSchema []byte) []Sch
 			if !ok {
 				panicf("expected $ref to be a string, got %v", schema["$ref"])
 			}
-			if !strings.HasPrefix(ref, "#/") {
-				panicf("expected $ref to start with `#/`, got %s", ref)
-			}
-			refPath := strings.ReplaceAll(ref[2:], "/", ".")
+			// NOTE: We expect all references to be part of the same file
+			ref = strings.Split(ref, "#")[1]
+			refPath := strings.ReplaceAll(ref[1:], "/", ".")
 			res := gjson.GetBytes(rootSchema, refPath)
 			if !res.Exists() {
 				panicf("could not find the reference at path %s in the root schema %s", refPath, rootSchema)
