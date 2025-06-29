@@ -497,6 +497,8 @@ func schemaType(schema map[string]any) []string {
 		return []string{"const"}
 	} else if _, found := schema["enum"]; found {
 		return []string{"enum"}
+	} else if _, found := schema["required"]; found {
+		return []string{"object"}
 	} else if _, found := schema["x-kubernetes-preserve-unknown-fields"]; found {
 		return []string{"x-kubernetes-preserve-unknown-fields"}
 	} else if _, found := schema["$ref"]; found {
