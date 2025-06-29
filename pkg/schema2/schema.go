@@ -387,6 +387,20 @@ func walkSchemaDocs(path string, schema map[string]any, rootSchema []byte) []Sch
 					docs = append(docs, walkSchemaDocs(fmt.Sprintf("%s?%d", path, i), choice, rootSchema)...)
 				}
 			}
+		case "allOf":
+			typeString = schemaTypes[0]
+			elements_ := schema[typeString]
+			elements, ok := elements_.([]any)
+			if !ok {
+				panicf("expected allOf to be []any, got %T", elements_)
+			}
+			for _, element_ := range elements {
+				element, ok := element_.(map[string]any)
+				if !ok {
+					panicf("expected an allOf element to be map[string]any, got %T", element_)
+				}
+				docs = append(docs, walkSchemaDocs(path, element, rootSchema)...)
+			}
 		case "$ref":
 			if _, found := schema["$ref"]; !found {
 				panicf("expected type $ref to have property $ref, got %+v", schema)
@@ -459,6 +473,8 @@ func schemaType(schema map[string]any) []string {
 		return []string{"oneOf"}
 	} else if _, found := schema["anyOf"]; found {
 		return []string{"anyOf"}
+	} else if _, found := schema["allOf"]; found {
+		return []string{"allOf"}
 	} else if _, found := schema["const"]; found {
 		return []string{"const"}
 	} else if _, found := schema["enum"]; found {

@@ -258,6 +258,9 @@ var refs string
 //go:embed testdata/refs2.json
 var refs2 string
 
+//go:embed testdata/allOf.json
+var allOf string
+
 func TestSchemaDocs(t *testing.T) {
 	tests := map[string]struct {
 		schema string
@@ -415,6 +418,21 @@ func TestSchemaDocs(t *testing.T) {
 				{
 					Path:        "name",
 					Description: "The name of the person",
+					Type:        "string",
+				},
+			},
+		},
+		"allOf": {
+			schema: allOf,
+			docs: []SchemaProperty{
+				{
+					Path:        "created_at",
+					Description: "when it was created",
+					Type:        "integer",
+				},
+				{
+					Path:        "name",
+					Description: "the name of the object",
 					Type:        "string",
 				},
 			},

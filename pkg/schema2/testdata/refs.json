@@ -1,0 +1,15 @@
+{
+  "$ref": "#/definitions/Person",
+  "definitions": {
+    "Person": {
+      "description": "A person",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The name of the person"
+        }
+      },
+      "type": "object"
+    }
+  }
+}
