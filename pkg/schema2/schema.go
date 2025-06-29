@@ -433,7 +433,39 @@ func walkSchemaDocs(path string, schema map[string]any, rootSchema []byte) []Sch
 	default:
 		typeString = "[" + strings.Join(schemaTypes, ", ") + "]"
 		if slices.Contains(schemaTypes, "object") {
-			panicf("multiple types containing `object` is not supported, got %v", schemaTypes)
+			// TODO: Duplicate code with type == "object" above
+			properties_, found := schema["properties"]
+			if !found {
+				break
+			}
+			properties, ok := properties_.(map[string]any)
+			if !ok {
+				panicf("expected properties to be map[string]any, got %T", properties_)
+			}
+			var requiredProperties []string
+			if required_, found := schema["required"]; found {
+				required, ok := required_.([]any)
+				if ok {
+					for _, p := range required {
+						requiredProperties = append(requiredProperties, p.(string))
+					}
+				}
+			}
+			for property, subSchema_ := range properties {
+				subSchema, ok := subSchema_.(map[string]any)
+				if !ok {
+					panicf("expected schema to be map[string]any, got %T", subSchema_)
+				}
+				subPath := property
+				if path != "" {
+					subPath = path + "." + property
+				}
+				subDocs := walkSchemaDocs(subPath, subSchema, rootSchema)
+				if slices.Contains(requiredProperties, property) {
+					subDocs[0].Required = true
+				}
+				docs = append(docs, subDocs...)
+			}
 		} else if slices.Contains(schemaTypes, "array") {
 			panicf("multiple types containing `array` is not supported, got %v", schemaTypes)
 		}
