@@ -309,6 +309,9 @@ type SchemaProperty struct {
 // port?1.name    The port name    string
 
 // TODO: Maybe the root should be `.` instead of any empty string
+
+var rootChoicePattern = regexp.MustCompile(`^\?\d+$`)
+
 func walkSchemaDocs(path string, schema map[string]any, rootSchema []byte) []SchemaProperty {
 	var docs []SchemaProperty
 	var desc string
@@ -436,7 +439,7 @@ func walkSchemaDocs(path string, schema map[string]any, rootSchema []byte) []Sch
 			panicf("multiple types containing `array` is not supported, got %v", schemaTypes)
 		}
 	}
-	if path != "" {
+	if path != "" && !rootChoicePattern.MatchString(path) {
 		docs = append(docs, SchemaProperty{
 			Path:        path,
 			Description: desc,
