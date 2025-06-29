@@ -455,7 +455,22 @@ func panicf(format string, args ...any) {
 
 // The return value will have at least one element
 func schemaType(schema map[string]any) []string {
-	if type_, found := schema["type"]; found {
+	// Prioritize anyOf, oneOf, allOf over type: object
+	if _, found := schema["anyOf"]; found {
+		return []string{"anyOf"}
+	} else if _, found := schema["oneOf"]; found {
+		return []string{"oneOf"}
+	} else if _, found := schema["allOf"]; found {
+		return []string{"allOf"}
+	} else if _, found := schema["const"]; found {
+		return []string{"const"}
+	} else if _, found := schema["enum"]; found {
+		return []string{"enum"}
+	} else if _, found := schema["x-kubernetes-preserve-unknown-fields"]; found {
+		return []string{"x-kubernetes-preserve-unknown-fields"}
+	} else if _, found := schema["$ref"]; found {
+		return []string{"$ref"}
+	} else if type_, found := schema["type"]; found {
 		switch type_ := type_.(type) {
 		case string:
 			return []string{type_}
@@ -472,20 +487,6 @@ func schemaType(schema map[string]any) []string {
 		default:
 			panicf("expected type to be a string or an array, got %v", type_)
 		}
-	} else if _, found := schema["oneOf"]; found {
-		return []string{"oneOf"}
-	} else if _, found := schema["anyOf"]; found {
-		return []string{"anyOf"}
-	} else if _, found := schema["allOf"]; found {
-		return []string{"allOf"}
-	} else if _, found := schema["const"]; found {
-		return []string{"const"}
-	} else if _, found := schema["enum"]; found {
-		return []string{"enum"}
-	} else if _, found := schema["x-kubernetes-preserve-unknown-fields"]; found {
-		return []string{"x-kubernetes-preserve-unknown-fields"}
-	} else if _, found := schema["$ref"]; found {
-		return []string{"$ref"}
 	}
 	panic(fmt.Sprintf("could not figure out the type of this schema: %v", schema))
 }
