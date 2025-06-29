@@ -509,7 +509,9 @@ func schemaType(schema map[string]any) []string {
 			var types []string
 			for _, t := range type_ {
 				if t, ok := t.(string); ok {
-					types = append(types, t)
+					if t != "null" {
+						types = append(types, t)
+					}
 				} else {
 					panicf("expected type all elements in `type` to be strings, got %v", t)
 				}
