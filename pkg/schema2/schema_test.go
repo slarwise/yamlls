@@ -368,17 +368,21 @@ func TestSchemaDocs(t *testing.T) {
 			schema: anyOf,
 			docs: []SchemaProperty{
 				{
-					Path:        "port",
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".port",
 					Description: "The port of the service",
 					Type:        "anyOf",
 				},
 				{
-					Path:        "port?0",
+					Path:        ".port?0",
 					Description: "The port name",
 					Type:        "string",
 				},
 				{
-					Path:        "port?1",
+					Path:        ".port?1",
 					Description: "The port number",
 					Type:        "integer",
 				},
@@ -433,7 +437,7 @@ func TestSchemaDocs(t *testing.T) {
 					Type: "object",
 				},
 				{
-					Path:        "port",
+					Path:        ".port",
 					Description: "The port of the service",
 					Type:        "[string, integer]",
 				},
@@ -473,12 +477,16 @@ func TestSchemaDocs(t *testing.T) {
 			schema: allOf,
 			docs: []SchemaProperty{
 				{
-					Path:        "created_at",
+					Path: ".",
+					Type: "allOf",
+				},
+				{
+					Path:        ".created_at",
 					Description: "when it was created",
 					Type:        "integer",
 				},
 				{
-					Path:        "name",
+					Path:        ".name",
 					Description: "the name of the object",
 					Type:        "string",
 				},

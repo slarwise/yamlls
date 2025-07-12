@@ -661,7 +661,35 @@ type Type struct {
 	Many []string
 }
 
-func Docs2(s Schema) []SchemaProperty { return docs2(".", s) }
+func (t *Type) UnmarshalJSON(b []byte) error {
+	var val any
+	if err := json.Unmarshal(b, &val); err != nil {
+		return err
+	}
+	switch concreteVal := val.(type) {
+	case string:
+		t.One = concreteVal
+	case []any:
+		for _, e := range concreteVal {
+			if s, ok := e.(string); ok {
+				t.Many = append(t.Many, s)
+			} else {
+				return fmt.Errorf("expected string, got %v", e)
+			}
+		}
+	default:
+		return fmt.Errorf("expected string or array of strings, got %v", concreteVal)
+	}
+	return nil
+}
+
+func Docs2(s Schema) []SchemaProperty {
+	docs := docs2(".", s)
+	slices.SortFunc(docs, func(a, b SchemaProperty) int {
+		return strings.Compare(a.Path, b.Path)
+	})
+	return docs
+}
 func docs2(path string, s Schema) []SchemaProperty {
 	docs := []SchemaProperty{{Path: path, Description: s.Description, Type: typeString(s)}}
 	for prop /* webdev moment */, schema := range s.Properties {
@@ -687,11 +715,21 @@ func docs2(path string, s Schema) []SchemaProperty {
 }
 
 func typeString(s Schema) string {
-	t := s.Type
 	if s.Const != "" {
-		t = "const"
+		return "const"
 	} else if len(s.Enum) > 0 {
-		t = "enum"
+		return "enum"
+	} else if len(s.AnyOf) > 0 {
+		return "anyOf"
+	} else if len(s.OneOf) > 0 {
+		return "oneOf"
+	} else if len(s.AllOf) > 0 {
+		return "allOf"
 	}
-	return t
+	if s.Type.One != "" {
+		return s.Type.One
+	} else if len(s.Type.Many) > 0 {
+		return fmt.Sprintf("[%s]", strings.Join(s.Type.Many, ", "))
+	}
+	return ""
 }
