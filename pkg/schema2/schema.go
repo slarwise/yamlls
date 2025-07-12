@@ -642,3 +642,56 @@ func (s KubernetesStore) DocumentationAtCursor(file string, line, char int) (Sch
 	}
 	return property, nil
 }
+
+type Schema struct {
+	// TODO: type can be either a string or a []string. Custom marshaller?
+	Type        Type              `json:"type"`
+	Description string            `json:"description"`
+	Properties  map[string]Schema `json:"properties"`
+	Items       *Schema           `json:"items"`
+	AnyOf       []Schema          `json:"anyOf"`
+	AllOf       []Schema          `json:"allOf"`
+	OneOf       []Schema          `json:"oneOf"`
+	Const       string            `json:"const"`
+	Enum        []string          `json:"enum"`
+}
+
+type Type struct {
+	One  string
+	Many []string
+}
+
+func Docs2(s Schema) []SchemaProperty { return docs2(".", s) }
+func docs2(path string, s Schema) []SchemaProperty {
+	docs := []SchemaProperty{{Path: path, Description: s.Description, Type: typeString(s)}}
+	for prop /* webdev moment */, schema := range s.Properties {
+		subPath := path + "." + prop
+		if path == "." {
+			subPath = path + prop
+		}
+		docs = append(docs, docs2(subPath, schema)...)
+	}
+	if s.Items != nil {
+		docs = append(docs, docs2(path+"[]", *s.Items)...)
+	}
+	for i, schema := range s.AnyOf {
+		docs = append(docs, docs2(fmt.Sprintf("%s?%d", path, i), schema)...)
+	}
+	for i, schema := range s.OneOf {
+		docs = append(docs, docs2(fmt.Sprintf("%s?%d", path, i), schema)...)
+	}
+	for _, schema := range s.AllOf {
+		docs = append(docs, docs2(path, schema)...)
+	}
+	return docs
+}
+
+func typeString(s Schema) string {
+	t := s.Type
+	if s.Const != "" {
+		t = "const"
+	} else if len(s.Enum) > 0 {
+		t = "enum"
+	}
+	return t
+}
