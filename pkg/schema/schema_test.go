@@ -413,6 +413,7 @@ func TestSchemaDocs(t *testing.T) {
 					Path:        ".level",
 					Description: "The log level",
 					Type:        "enum",
+					Required:    true,
 				},
 			},
 		},
@@ -538,7 +539,6 @@ func TestSchemaDocs(t *testing.T) {
 				t.Fatal(err)
 			}
 			docs := Docs(s, []byte(test.schema))
-			t.Logf("%+v", docs)
 			if len(docs) != len(test.docs) {
 				t.Fatalf("Expected %d properties with documentation, got %+v", len(test.docs), docs)
 			}
@@ -552,6 +552,9 @@ func TestSchemaDocs(t *testing.T) {
 				}
 				if d.Type != expected.Type {
 					t.Fatalf("Expected type `%s`, got `%s`", expected.Type, d.Type)
+				}
+				if d.Required != expected.Required {
+					t.Fatalf("Expected required to be `%t`, got `%t`", expected.Required, d.Required)
 				}
 			}
 		})

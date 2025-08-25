@@ -446,6 +446,7 @@ type Schema struct {
 	Const       string            `json:"const"`
 	Enum        []string          `json:"enum"`
 	Ref         string            `json:"$ref"`
+	Required    []string          `json:"required"`
 }
 
 type Type struct {
@@ -490,7 +491,11 @@ func docs2(path string, s Schema, root []byte) []SchemaProperty {
 		if path == "." {
 			subPath = path + prop
 		}
-		docs = append(docs, docs2(subPath, schema, root)...)
+		subDocs := docs2(subPath, schema, root)
+		if slices.Contains(s.Required, prop) {
+			subDocs[0].Required = true
+		}
+		docs = append(docs, subDocs...)
 	}
 	if s.Items != nil {
 		docs = append(docs, docs2(path+"[]", *s.Items, root)...)
