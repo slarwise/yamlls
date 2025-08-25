@@ -148,8 +148,8 @@ func (p paths) Visit(node ast.Node) ast.Visitor {
 	if node.Type() == ast.MappingValueType || node.Type() == ast.DocumentType {
 		return p
 	}
-	path := strings.TrimPrefix(node.GetPath(), "$.")
-	if path == "$" {
+	path := strings.TrimPrefix(node.GetPath(), "$")
+	if path == "" {
 		return p
 	}
 	path = arrayPattern.ReplaceAllString(path, ".$1")
@@ -323,6 +323,7 @@ func (s *schema) validate(d yamlDocument) []jsonValidationError {
 		if e.Type() == "additional_property_not_allowed" {
 			field = e.Field() + "." + e.Details()["property"].(string)
 		}
+		field = "." + field
 		errors = append(errors, jsonValidationError{
 			Field:   field,
 			Message: e.Description(),

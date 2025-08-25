@@ -18,23 +18,6 @@ import (
 var logger *slog.Logger
 
 func main() {
-	s := schema2.Schema{}
-	bytes := []byte(`{
-    "type": "object",
-    "description": "the thing",
-    "properties": {
-    	"hej": { "description": "the hej", "type": "string" }
-    }
-}`)
-	if err := json.Unmarshal(bytes, &s); err != nil {
-		panic(err)
-	}
-	for _, p := range schema2.Docs2(s, bytes) {
-		fmt.Printf("%+v\n", p)
-	}
-}
-
-func main2() {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		slog.Error("Failed to locate user's cache directory", "error", err)

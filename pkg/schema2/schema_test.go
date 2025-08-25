@@ -208,7 +208,7 @@ func TestSchemaValidate(t *testing.T) {
 			doc:    "name: 1",
 			errors: []jsonValidationError{
 				{
-					Field: "name",
+					Field: ".name",
 					Type:  "invalid_type",
 				},
 			},
@@ -572,14 +572,14 @@ func TestDocumentPaths(t *testing.T) {
       name: http
 `,
 			paths: paths{
-				"spec":              newRange(0, 0, 0, 4),
-				"spec.ports":        newRange(1, 2, 1, 7),
-				"spec.ports.0":      newRange(2, 4, 2, 5),
-				"spec.ports.0.port": newRange(2, 6, 2, 10),
-				"spec.ports.0.name": newRange(3, 6, 3, 10),
-				"spec.ports.1":      newRange(4, 4, 4, 5),
-				"spec.ports.1.port": newRange(4, 6, 4, 10),
-				"spec.ports.1.name": newRange(5, 6, 5, 10),
+				".spec":              newRange(0, 0, 0, 4),
+				".spec.ports":        newRange(1, 2, 1, 7),
+				".spec.ports.0":      newRange(2, 4, 2, 5),
+				".spec.ports.0.port": newRange(2, 6, 2, 10),
+				".spec.ports.0.name": newRange(3, 6, 3, 10),
+				".spec.ports.1":      newRange(4, 4, 4, 5),
+				".spec.ports.1.port": newRange(4, 6, 4, 10),
+				".spec.ports.1.name": newRange(5, 6, 5, 10),
 			},
 		},
 	}
