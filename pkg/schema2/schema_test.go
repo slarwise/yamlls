@@ -208,7 +208,7 @@ func TestSchemaValidate(t *testing.T) {
 			doc:    "name: 1",
 			errors: []jsonValidationError{
 				{
-					Field: "name",
+					Field: ".name",
 					Type:  "invalid_type",
 				},
 			},
@@ -276,7 +276,11 @@ func TestSchemaDocs(t *testing.T) {
 			schema: `{"type": "object", "properties": {"name": {"type": "string", "description": "The name of the person"}}}`,
 			docs: []SchemaProperty{
 				{
-					Path:        "name",
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".name",
 					Description: "The name of the person",
 					Type:        "string",
 				},
@@ -289,12 +293,16 @@ func TestSchemaDocs(t *testing.T) {
 				}}`,
 			docs: []SchemaProperty{
 				{
-					Path:        "name",
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".name",
 					Description: "The name of the person",
 					Type:        "string",
 				},
 				{
-					Path:        "riddler",
+					Path:        ".riddler",
 					Description: "riddle-riddle-riddle-riddle-riddle-diddle-diddle",
 					Type:        "boolean",
 				},
@@ -312,17 +320,21 @@ func TestSchemaDocs(t *testing.T) {
 				}}`,
 			docs: []SchemaProperty{
 				{
-					Path:        "tonyz",
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".tonyz",
 					Description: "Tony Zarets",
 					Type:        "array",
 				},
 				{
-					Path:        "tonyz[]",
+					Path:        ".tonyz[]",
 					Description: "An epic gamer",
 					Type:        "object",
 				},
 				{
-					Path:        "tonyz[].producerIsHuman",
+					Path:        ".tonyz[].producerIsHuman",
 					Description: "It is true",
 					Type:        "boolean",
 				},
@@ -332,17 +344,21 @@ func TestSchemaDocs(t *testing.T) {
 			schema: oneOf,
 			docs: []SchemaProperty{
 				{
-					Path:        "port",
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".port",
 					Description: "The port of the service",
 					Type:        "oneOf",
 				},
 				{
-					Path:        "port?0",
+					Path:        ".port?0",
 					Description: "The port name",
 					Type:        "string",
 				},
 				{
-					Path:        "port?1",
+					Path:        ".port?1",
 					Description: "The port number",
 					Type:        "integer",
 				},
@@ -352,17 +368,21 @@ func TestSchemaDocs(t *testing.T) {
 			schema: anyOf,
 			docs: []SchemaProperty{
 				{
-					Path:        "port",
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".port",
 					Description: "The port of the service",
 					Type:        "anyOf",
 				},
 				{
-					Path:        "port?0",
+					Path:        ".port?0",
 					Description: "The port name",
 					Type:        "string",
 				},
 				{
-					Path:        "port?1",
+					Path:        ".port?1",
 					Description: "The port number",
 					Type:        "integer",
 				},
@@ -372,7 +392,11 @@ func TestSchemaDocs(t *testing.T) {
 			schema: const_,
 			docs: []SchemaProperty{
 				{
-					Path:        "kind",
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".kind",
 					Description: "The service kind",
 					Type:        "const",
 				},
@@ -382,7 +406,11 @@ func TestSchemaDocs(t *testing.T) {
 			schema: enum,
 			docs: []SchemaProperty{
 				{
-					Path:        "level",
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".level",
 					Description: "The log level",
 					Type:        "enum",
 				},
@@ -392,9 +420,12 @@ func TestSchemaDocs(t *testing.T) {
 			schema: xKubernetesPreserveUnknownFields,
 			docs: []SchemaProperty{
 				{
-					Path:        "anything",
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".anything",
 					Description: "An object that can be anything",
-					Type:        "object",
 				},
 			},
 		},
@@ -402,9 +433,13 @@ func TestSchemaDocs(t *testing.T) {
 			schema: types,
 			docs: []SchemaProperty{
 				{
-					Path:        "port",
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".port",
 					Description: "The port of the service",
-					Type:        "[string, integer]",
+					Type:        "string, integer",
 				},
 			},
 		},
@@ -412,7 +447,12 @@ func TestSchemaDocs(t *testing.T) {
 			schema: refs,
 			docs: []SchemaProperty{
 				{
-					Path:        "name",
+					Path:        ".",
+					Type:        "object",
+					Description: "A person",
+				},
+				{
+					Path:        ".name",
 					Description: "The name of the person",
 					Type:        "string",
 				},
@@ -422,7 +462,12 @@ func TestSchemaDocs(t *testing.T) {
 			schema: refs2,
 			docs: []SchemaProperty{
 				{
-					Path:        "name",
+					Path:        ".",
+					Type:        "object",
+					Description: "A person",
+				},
+				{
+					Path:        ".name",
 					Description: "The name of the person",
 					Type:        "string",
 				},
@@ -432,7 +477,12 @@ func TestSchemaDocs(t *testing.T) {
 			schema: refs3,
 			docs: []SchemaProperty{
 				{
-					Path:        "name",
+					Path:        ".",
+					Type:        "object",
+					Description: "A person",
+				},
+				{
+					Path:        ".name",
 					Description: "The name of the person",
 					Type:        "string",
 				},
@@ -442,12 +492,16 @@ func TestSchemaDocs(t *testing.T) {
 			schema: allOf,
 			docs: []SchemaProperty{
 				{
-					Path:        "created_at",
+					Path: ".",
+					Type: "allOf",
+				},
+				{
+					Path:        ".created_at",
 					Description: "when it was created",
 					Type:        "integer",
 				},
 				{
-					Path:        "name",
+					Path:        ".name",
 					Description: "the name of the object",
 					Type:        "string",
 				},
@@ -457,12 +511,20 @@ func TestSchemaDocs(t *testing.T) {
 			schema: anyOfAndAllOf,
 			docs: []SchemaProperty{
 				{
-					Path:        "?0.created_at",
+					Path: ".",
+					Type: "anyOf",
+				},
+				{
+					Path: ".?0",
+					Type: "allOf",
+				},
+				{
+					Path:        ".?0.created_at",
 					Description: "when it was created",
 					Type:        "integer",
 				},
 				{
-					Path:        "?0.name",
+					Path:        ".?0.name",
 					Description: "the name",
 					Type:        "string",
 				},
@@ -471,8 +533,11 @@ func TestSchemaDocs(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			s := schema{loader: gojsonschema.NewStringLoader(test.schema)}
-			docs := s.Docs()
+			var s Schema
+			if err := json.Unmarshal([]byte(test.schema), &s); err != nil {
+				t.Fatal(err)
+			}
+			docs := Docs(s, []byte(test.schema))
 			t.Logf("%+v", docs)
 			if len(docs) != len(test.docs) {
 				t.Fatalf("Expected %d properties with documentation, got %+v", len(test.docs), docs)
@@ -507,14 +572,14 @@ func TestDocumentPaths(t *testing.T) {
       name: http
 `,
 			paths: paths{
-				"spec":              newRange(0, 0, 0, 4),
-				"spec.ports":        newRange(1, 2, 1, 7),
-				"spec.ports.0":      newRange(2, 4, 2, 5),
-				"spec.ports.0.port": newRange(2, 6, 2, 10),
-				"spec.ports.0.name": newRange(3, 6, 3, 10),
-				"spec.ports.1":      newRange(4, 4, 4, 5),
-				"spec.ports.1.port": newRange(4, 6, 4, 10),
-				"spec.ports.1.name": newRange(5, 6, 5, 10),
+				".spec":              newRange(0, 0, 0, 4),
+				".spec.ports":        newRange(1, 2, 1, 7),
+				".spec.ports.0":      newRange(2, 4, 2, 5),
+				".spec.ports.0.port": newRange(2, 6, 2, 10),
+				".spec.ports.0.name": newRange(3, 6, 3, 10),
+				".spec.ports.1":      newRange(4, 4, 4, 5),
+				".spec.ports.1.port": newRange(4, 6, 4, 10),
+				".spec.ports.1.name": newRange(5, 6, 5, 10),
 			},
 		},
 	}
