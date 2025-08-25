@@ -228,7 +228,7 @@ func (s *schema) HtmlDocs(highlightProperty string) string {
 	if err := json.Unmarshal(bytes, &parsedSchema); err != nil {
 		panicf("unmarshal schema to Schema: %s", err)
 	}
-	docs := Docs2(parsedSchema, bytes)
+	docs := Docs(parsedSchema, bytes)
 	output := strings.Builder{}
 	fmt.Fprint(&output, `<!DOCTYPE html>
 <html>
@@ -420,7 +420,7 @@ func (s KubernetesStore) DocumentationAtCursor(file string, line, char int) (Sch
 	if err := json.Unmarshal(bytes, &parsedSchema); err != nil {
 		panicf("unmarshal schema to Schema: %s", err)
 	}
-	properties := Docs2(parsedSchema, bytes)
+	properties := Docs(parsedSchema, bytes)
 	var property SchemaProperty
 	for _, p := range properties {
 		if p.Path == path {
@@ -475,7 +475,7 @@ func (t *Type) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func Docs2(s Schema, rootSchema []byte) []SchemaProperty {
+func Docs(s Schema, rootSchema []byte) []SchemaProperty {
 	docs := docs2(".", s, rootSchema)
 	slices.SortFunc(docs, func(a, b SchemaProperty) int {
 		return strings.Compare(a.Path, b.Path)
@@ -543,7 +543,7 @@ func typeString(s Schema) string {
 	if s.Type.One != "" {
 		return s.Type.One
 	} else if len(s.Type.Many) > 0 {
-		return fmt.Sprintf("[%s]", strings.Join(s.Type.Many, ", "))
+		return fmt.Sprintf("%s", strings.Join(s.Type.Many, ", "))
 	}
 	return ""
 }

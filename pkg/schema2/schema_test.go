@@ -439,7 +439,7 @@ func TestSchemaDocs(t *testing.T) {
 				{
 					Path:        ".port",
 					Description: "The port of the service",
-					Type:        "[string, integer]",
+					Type:        "string, integer",
 				},
 			},
 		},
@@ -537,7 +537,7 @@ func TestSchemaDocs(t *testing.T) {
 			if err := json.Unmarshal([]byte(test.schema), &s); err != nil {
 				t.Fatal(err)
 			}
-			docs := Docs2(s, []byte(test.schema))
+			docs := Docs(s, []byte(test.schema))
 			t.Logf("%+v", docs)
 			if len(docs) != len(test.docs) {
 				t.Fatalf("Expected %d properties with documentation, got %+v", len(test.docs), docs)
