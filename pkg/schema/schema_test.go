@@ -1,4 +1,4 @@
-package schema2
+package schema
 
 import (
 	_ "embed"

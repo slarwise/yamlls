@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/slarwise/yamlls/internal/lsp"
-	"github.com/slarwise/yamlls/pkg/schema2"
+	"github.com/slarwise/yamlls/pkg/schema"
 
 	"go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
@@ -35,7 +35,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	kubernetesStore, err := schema2.NewKubernetesStore()
+	kubernetesStore, err := schema.NewKubernetesStore()
 	if err != nil {
 		slog.Error("create kubernetes store", "err", err)
 		os.Exit(1)
@@ -231,7 +231,7 @@ func main() {
 	os.Exit(1)
 }
 
-func validateFile(contents string, store schema2.KubernetesStore) ([]protocol.Diagnostic, error) {
+func validateFile(contents string, store schema.KubernetesStore) ([]protocol.Diagnostic, error) {
 	errors := store.ValidateFile(contents)
 	diagnostics := []protocol.Diagnostic{}
 	for _, e := range errors {

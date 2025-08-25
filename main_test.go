@@ -3,14 +3,14 @@ package main
 import (
 	"testing"
 
-	"github.com/slarwise/yamlls/pkg/schema2"
+	"github.com/slarwise/yamlls/pkg/schema"
 	"go.lsp.dev/protocol"
 )
 
 // TODO: Not really a reason to test this since it just wraps
-// schema2.ValidateFile. Merge these tests with schema_test
+// schema.ValidateFile. Merge these tests with schema_test
 func TestValidateFile(t *testing.T) {
-	store, err := schema2.NewKubernetesStore()
+	store, err := schema.NewKubernetesStore()
 	if err != nil {
 		t.Fatalf("unexepcted error: %v", err)
 	}
