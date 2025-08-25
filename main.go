@@ -29,7 +29,7 @@ func main() {
 	if err := json.Unmarshal(bytes, &s); err != nil {
 		panic(err)
 	}
-	for _, p := range schema2.Docs2(s) {
+	for _, p := range schema2.Docs2(s, bytes) {
 		fmt.Printf("%+v\n", p)
 	}
 }

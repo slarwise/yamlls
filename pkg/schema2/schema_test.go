@@ -447,7 +447,12 @@ func TestSchemaDocs(t *testing.T) {
 			schema: refs,
 			docs: []SchemaProperty{
 				{
-					Path:        "name",
+					Path:        ".",
+					Type:        "object",
+					Description: "A person",
+				},
+				{
+					Path:        ".name",
 					Description: "The name of the person",
 					Type:        "string",
 				},
@@ -457,7 +462,12 @@ func TestSchemaDocs(t *testing.T) {
 			schema: refs2,
 			docs: []SchemaProperty{
 				{
-					Path:        "name",
+					Path:        ".",
+					Type:        "object",
+					Description: "A person",
+				},
+				{
+					Path:        ".name",
 					Description: "The name of the person",
 					Type:        "string",
 				},
@@ -467,7 +477,12 @@ func TestSchemaDocs(t *testing.T) {
 			schema: refs3,
 			docs: []SchemaProperty{
 				{
-					Path:        "name",
+					Path:        ".",
+					Type:        "object",
+					Description: "A person",
+				},
+				{
+					Path:        ".name",
 					Description: "The name of the person",
 					Type:        "string",
 				},
@@ -496,12 +511,20 @@ func TestSchemaDocs(t *testing.T) {
 			schema: anyOfAndAllOf,
 			docs: []SchemaProperty{
 				{
-					Path:        "?0.created_at",
+					Path: ".",
+					Type: "anyOf",
+				},
+				{
+					Path: ".?0",
+					Type: "allOf",
+				},
+				{
+					Path:        ".?0.created_at",
 					Description: "when it was created",
 					Type:        "integer",
 				},
 				{
-					Path:        "?0.name",
+					Path:        ".?0.name",
 					Description: "the name",
 					Type:        "string",
 				},
@@ -510,12 +533,11 @@ func TestSchemaDocs(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			// s := schema{loader: gojsonschema.NewStringLoader(test.schema)}
 			var s Schema
 			if err := json.Unmarshal([]byte(test.schema), &s); err != nil {
 				t.Fatal(err)
 			}
-			docs := Docs2(s)
+			docs := Docs2(s, []byte(test.schema))
 			t.Logf("%+v", docs)
 			if len(docs) != len(test.docs) {
 				t.Fatalf("Expected %d properties with documentation, got %+v", len(test.docs), docs)

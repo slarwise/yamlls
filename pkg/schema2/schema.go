@@ -644,7 +644,6 @@ func (s KubernetesStore) DocumentationAtCursor(file string, line, char int) (Sch
 }
 
 type Schema struct {
-	// TODO: type can be either a string or a []string. Custom marshaller?
 	Type        Type              `json:"type"`
 	Description string            `json:"description"`
 	Properties  map[string]Schema `json:"properties"`
@@ -654,6 +653,7 @@ type Schema struct {
 	OneOf       []Schema          `json:"oneOf"`
 	Const       string            `json:"const"`
 	Enum        []string          `json:"enum"`
+	Ref         string            `json:"$ref"`
 }
 
 type Type struct {
@@ -683,33 +683,55 @@ func (t *Type) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-func Docs2(s Schema) []SchemaProperty {
-	docs := docs2(".", s)
+func Docs2(s Schema, rootSchema []byte) []SchemaProperty {
+	docs := docs2(".", s, rootSchema)
 	slices.SortFunc(docs, func(a, b SchemaProperty) int {
 		return strings.Compare(a.Path, b.Path)
 	})
 	return docs
 }
-func docs2(path string, s Schema) []SchemaProperty {
+
+func docs2(path string, s Schema, root []byte) []SchemaProperty {
 	docs := []SchemaProperty{{Path: path, Description: s.Description, Type: typeString(s)}}
 	for prop /* webdev moment */, schema := range s.Properties {
 		subPath := path + "." + prop
 		if path == "." {
 			subPath = path + prop
 		}
-		docs = append(docs, docs2(subPath, schema)...)
+		docs = append(docs, docs2(subPath, schema, root)...)
 	}
 	if s.Items != nil {
-		docs = append(docs, docs2(path+"[]", *s.Items)...)
+		docs = append(docs, docs2(path+"[]", *s.Items, root)...)
 	}
 	for i, schema := range s.AnyOf {
-		docs = append(docs, docs2(fmt.Sprintf("%s?%d", path, i), schema)...)
+		docs = append(docs, docs2(fmt.Sprintf("%s?%d", path, i), schema, root)...)
 	}
 	for i, schema := range s.OneOf {
-		docs = append(docs, docs2(fmt.Sprintf("%s?%d", path, i), schema)...)
+		docs = append(docs, docs2(fmt.Sprintf("%s?%d", path, i), schema, root)...)
 	}
-	for _, schema := range s.AllOf {
-		docs = append(docs, docs2(path, schema)...)
+	if len(s.AllOf) > 0 {
+		var subDocs []SchemaProperty
+		for _, schema := range s.AllOf {
+			subDocs = append(subDocs, docs2(path, schema, root)...)
+		}
+		subDocs = slices.DeleteFunc(subDocs, func(s SchemaProperty) bool {
+			return s.Path == path
+		})
+		docs = append(docs, subDocs...)
+	}
+	if s.Ref != "" {
+		// NOTE: We expect all references to be part of the same file
+		ref := strings.Split(s.Ref, "#")[1]
+		refPath := strings.ReplaceAll(ref[1:], "/", ".")
+		res := gjson.GetBytes(root, refPath)
+		if !res.Exists() {
+			panicf("could not find the reference at path %s in the root schema %s", refPath, root)
+		}
+		var refSchema Schema
+		if err := json.Unmarshal([]byte(res.Raw), &refSchema); err != nil {
+			panicf("expected ref to point to a valid schema: %s", err)
+		}
+		docs = docs2(path, refSchema, root)
 	}
 	return docs
 }
