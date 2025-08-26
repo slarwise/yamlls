@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/slarwise/yamlls/pkg/schema"
+	"github.com/tidwall/gjson"
 
 	"github.com/goccy/go-yaml"
 	"go.lsp.dev/protocol"
@@ -248,27 +250,33 @@ func showDocs(kind string) error {
 			matches = append(matches, id)
 		}
 	}
+	var resolvedId string
 	switch len(matches) {
 	case 0:
 		return fmt.Errorf("no schema found matching kind `%s`", kind)
 	case 1:
-		fmt.Println(matches[0])
+		resolvedId = matches[0]
 	default:
 		found := false
 		for _, id := range matches {
 			gvk := parseSchemaId(id)
 			// Favor native schemas. These have no group name or one without a dot
 			if gvk.group == "" || strings.Count(gvk.group, ".") == 0 {
-				fmt.Println(id)
+				resolvedId = id
 				found = true
 				break
 			}
 		}
 		if !found {
-			fmt.Println(matches[0])
+			resolvedId = matches[0]
 		}
 	}
-	panic("TODO: Create and print the html docs")
+	docs, err := docs(resolvedId)
+	if err != nil {
+		return fmt.Errorf("create docs for %s: %s", resolvedId, err)
+	}
+	fmt.Print(htmlDocs(docs, ""))
+	return nil
 }
 
 type GVK struct{ group, version, kind string }
@@ -284,6 +292,182 @@ func parseSchemaId(id string) GVK {
 		gvk.version = split[2]
 	}
 	return gvk
+}
+
+type Schema struct {
+	Type        Type              `json:"type"`
+	Description string            `json:"description"`
+	Properties  map[string]Schema `json:"properties"`
+	Items       *Schema           `json:"items"`
+	AnyOf       []Schema          `json:"anyOf"`
+	AllOf       []Schema          `json:"allOf"`
+	OneOf       []Schema          `json:"oneOf"`
+	Const       string            `json:"const"`
+	Enum        []string          `json:"enum"`
+	Ref         string            `json:"$ref"`
+	Required    []string          `json:"required"`
+}
+
+type Type struct {
+	One  string
+	Many []string
+}
+
+func (t *Type) UnmarshalJSON(b []byte) error {
+	var val any
+	if err := json.Unmarshal(b, &val); err != nil {
+		return err
+	}
+	switch concreteVal := val.(type) {
+	case string:
+		t.One = concreteVal
+	case []any:
+		for _, e := range concreteVal {
+			if s, ok := e.(string); ok {
+				t.Many = append(t.Many, s)
+			} else {
+				return fmt.Errorf("expected string, got %v", e)
+			}
+		}
+	default:
+		return fmt.Errorf("expected string or array of strings, got %v", concreteVal)
+	}
+	return nil
+}
+
+type SchemaProperty struct {
+	Path, Description, Type string
+	Required                bool
+}
+
+func docs(id string) ([]SchemaProperty, error) {
+	filename := filepath.Join(DB_DIR, id)
+	schemaBytes, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("read schema %s: %s", filename, err)
+	}
+	var schemaParsed Schema
+	if err := json.Unmarshal(schemaBytes, &schemaParsed); err != nil {
+		return nil, fmt.Errorf("parse schema: %s", err)
+	}
+	properties := docs2(".", schemaParsed, schemaBytes)
+	return properties, nil
+}
+
+func docs2(path string, s Schema, root []byte) []SchemaProperty {
+	docs := []SchemaProperty{{Path: path, Description: s.Description, Type: typeString(s)}}
+	for prop /* webdev moment */, schema := range s.Properties {
+		subPath := path + "." + prop
+		if path == "." {
+			subPath = path + prop
+		}
+		subDocs := docs2(subPath, schema, root)
+		if slices.Contains(s.Required, prop) {
+			subDocs[0].Required = true
+		}
+		docs = append(docs, subDocs...)
+	}
+	if s.Items != nil {
+		docs = append(docs, docs2(path+"[]", *s.Items, root)...)
+	}
+	for i, schema := range s.AnyOf {
+		docs = append(docs, docs2(fmt.Sprintf("%s?%d", path, i), schema, root)...)
+	}
+	for i, schema := range s.OneOf {
+		docs = append(docs, docs2(fmt.Sprintf("%s?%d", path, i), schema, root)...)
+	}
+	if len(s.AllOf) > 0 {
+		var subDocs []SchemaProperty
+		for _, schema := range s.AllOf {
+			subDocs = append(subDocs, docs2(path, schema, root)...)
+		}
+		subDocs = slices.DeleteFunc(subDocs, func(s SchemaProperty) bool {
+			return s.Path == path
+		})
+		docs = append(docs, subDocs...)
+	}
+	if s.Ref != "" {
+		// NOTE: We expect all references to be part of the same file
+		ref := strings.Split(s.Ref, "#")[1]
+		refPath := strings.ReplaceAll(ref[1:], "/", ".")
+		res := gjson.GetBytes(root, refPath)
+		if !res.Exists() {
+			panicf("could not find the reference at path %s in the root schema %s", refPath, root)
+		}
+		var refSchema Schema
+		if err := json.Unmarshal([]byte(res.Raw), &refSchema); err != nil {
+			panicf("expected ref to point to a valid schema: %s", err)
+		}
+		docs = docs2(path, refSchema, root)
+	}
+	return docs
+}
+
+func typeString(s Schema) string {
+	if s.Const != "" {
+		return "const"
+	} else if len(s.Enum) > 0 {
+		return "enum"
+	} else if len(s.AnyOf) > 0 {
+		return "anyOf"
+	} else if len(s.OneOf) > 0 {
+		return "oneOf"
+	} else if len(s.AllOf) > 0 {
+		return "allOf"
+	}
+	if s.Type.One != "" {
+		return s.Type.One
+	} else if len(s.Type.Many) > 0 {
+		return fmt.Sprintf("%s", strings.Join(s.Type.Many, ", "))
+	}
+	return ""
+}
+
+func panicf(format string, args ...any) {
+	panic(fmt.Sprintf(format, args...))
+}
+
+func htmlDocs(docs []SchemaProperty, highlightProperty string) string {
+	output := strings.Builder{}
+	fmt.Fprint(&output, `<!DOCTYPE html>
+<html>
+<head>
+  <title>Documentation</title>
+  <style>
+    body {background-color: #3f3f3f; color: #DCDCCC; font-size: 18px; }
+    code {font-size: 80%;}
+    code.required {color: #E0CF9F;}
+    span.path {color: #DCA3A3; }
+  </style>
+</head>
+`)
+	fmt.Fprintln(&output, "<body>")
+
+	for _, property := range docs {
+		fmt.Fprintln(&output, "  <p>")
+
+		requiredClass := ""
+		if property.Required {
+			requiredClass = ` class="required"`
+		}
+		fmt.Fprintf(&output, `    <span class="path" id="%s">%s</span> <code%s>[%s]</code>`, property.Path, property.Path, requiredClass, property.Type)
+
+		fmt.Fprintln(&output)
+		if property.Description != "" {
+			fmt.Fprint(&output, "    <br>\n")
+			fmt.Fprintf(&output, "    %s\n", property.Description)
+		}
+		fmt.Fprintln(&output, "  </p>")
+	}
+
+	if highlightProperty != "" {
+		fmt.Fprintf(&output, `  <script>window.location.hash = "%s"</script>`, highlightProperty)
+		fmt.Fprintln(&output, "")
+	}
+
+	fmt.Fprintln(&output, "</body>")
+	fmt.Fprintln(&output, "</html>")
+	return output.String()
 }
 
 // func languageServer() {
