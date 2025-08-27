@@ -4,7 +4,7 @@ metadata:
   name: hej
 spec:
   destination:
-    name: ""
+    name: 3
     namespace: ""
     server: ""
   project: ""
@@ -26,11 +26,12 @@ kind: Namespace
 apiVersion: v1
 metadata:
   name: hej
-spec: {}
+spec:
+  hej: du
 ---
 kind: Deployment
 apiVersion: apps/v1
 spec:
   selector: {}
   template:
-    spec:
+    spec: la

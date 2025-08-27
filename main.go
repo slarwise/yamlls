@@ -8,14 +8,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
-	"github.com/slarwise/yamlls/pkg/schema"
+	yamlparser "github.com/goccy/go-yaml/parser"
 	"github.com/tidwall/gjson"
+	"github.com/xeipuuv/gojsonschema"
 
 	"github.com/goccy/go-yaml"
-	"go.lsp.dev/protocol"
+	"github.com/goccy/go-yaml/ast"
 )
 
 var (
@@ -59,10 +61,10 @@ func run() error {
 			}
 		case "docs":
 			if len(args) == 0 {
-				return fmt.Errorf("must provide `kind`, e.g. yamlls list-schemas deployment")
+				return fmt.Errorf("must provide `basename`, e.g. `yamlls docs Deployment-apps-v1.json`. Get the basename from `yamlls schemas`.")
 			}
-			kind := args[0]
-			if err := showDocs(kind); err != nil {
+			basename := args[0]
+			if err := showDocs(basename); err != nil {
 				return fmt.Errorf("get docs: %s", err)
 			}
 		case "fill":
@@ -76,7 +78,9 @@ func run() error {
 				return fmt.Errorf("must provide the filename to validate")
 			}
 			file := args[0]
-			panic(fmt.Sprintf("TODO: Validate file `%s` against its schema", file))
+			if err := validateFile(file); err != nil {
+				return fmt.Errorf("validate file `%s`: %s", file, err)
+			}
 		case "refresh":
 			if err := refreshDatabase(); err != nil {
 				return fmt.Errorf("refresh database: %s", err)
@@ -178,7 +182,7 @@ func refreshDatabase() error {
 					return fmt.Errorf("expected apiVersion to have exactly one `/`, got %s", d.ApiVersion)
 				}
 				group, version := split[0], split[1]
-				schemaId := gvkToSchemaId(d.Kind, group, version)
+				schemaId := gvkToSchemaId(group, version, d.Kind)
 				baseName := schemaId + ".json"
 				filename := filepath.Join(DB_DIR, baseName)
 				if err := os.WriteFile(filename, body, 0644); err != nil {
@@ -237,43 +241,15 @@ func schemaIds() ([]string, error) {
 	return ids, nil
 }
 
-func showDocs(kind string) error {
-	ids, err := schemaIds()
+func showDocs(basename string) error {
+	filename := filepath.Join(DB_DIR, basename)
+	schema, err := os.ReadFile(filename)
 	if err != nil {
-		return fmt.Errorf("get schema ids: %s", err)
+		return fmt.Errorf("read schema %s: %s", filename, err)
 	}
-	kind = strings.ToLower(kind)
-	var matches []string
-	for _, id := range ids {
-		currentKind := strings.Split(id, "-")[0]
-		if strings.ToLower(currentKind) == kind {
-			matches = append(matches, id)
-		}
-	}
-	var resolvedId string
-	switch len(matches) {
-	case 0:
-		return fmt.Errorf("no schema found matching kind `%s`", kind)
-	case 1:
-		resolvedId = matches[0]
-	default:
-		found := false
-		for _, id := range matches {
-			gvk := schemaIdToGvk(id)
-			// Favor native schemas. These have no group name or one without a dot
-			if gvk.group == "" || strings.Count(gvk.group, ".") == 0 {
-				resolvedId = id
-				found = true
-				break
-			}
-		}
-		if !found {
-			resolvedId = matches[0]
-		}
-	}
-	docs, err := docs(resolvedId)
+	docs, err := docs(schema)
 	if err != nil {
-		return fmt.Errorf("create docs for %s: %s", resolvedId, err)
+		return fmt.Errorf("create docs for %s: %s", filename, err)
 	}
 	fmt.Print(htmlDocs(docs, ""))
 	return nil
@@ -349,17 +325,12 @@ type SchemaProperty struct {
 	Required                bool
 }
 
-func docs(id string) ([]SchemaProperty, error) {
-	filename := filepath.Join(DB_DIR, id)
-	schemaBytes, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("read schema %s: %s", filename, err)
-	}
+func docs(schema []byte) ([]SchemaProperty, error) {
 	var schemaParsed Schema
-	if err := json.Unmarshal(schemaBytes, &schemaParsed); err != nil {
+	if err := json.Unmarshal(schema, &schemaParsed); err != nil {
 		return nil, fmt.Errorf("parse schema: %s", err)
 	}
-	properties := docs2(".", schemaParsed, schemaBytes)
+	properties := docs2(".", schemaParsed, schema)
 	return properties, nil
 }
 
@@ -477,6 +448,219 @@ func htmlDocs(docs []SchemaProperty, highlightProperty string) string {
 	fmt.Fprintln(&output, "</body>")
 	fmt.Fprintln(&output, "</html>")
 	return output.String()
+}
+
+func validateFile(filename string) error {
+	bytes, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("read file %s: %s", filename, err)
+	}
+	lines := strings.FieldsFunc(string(bytes), func(r rune) bool { return r == '\n' })
+	positions := getDocumentPositions(string(bytes))
+	var errors []ValidationError
+	for _, docPos := range positions {
+		documentString := strings.Join(lines[docPos.Start:docPos.End], "\n")
+
+		var document map[string]any
+		if err := yaml.Unmarshal([]byte(documentString), &document); err != nil {
+			errors = append(errors, ValidationError{
+				Range: Range{
+					Start: Position{
+						Line: docPos.Start,
+						Char: 0,
+					},
+					End: Position{
+						Line: docPos.End,
+						Char: 0,
+					},
+				},
+				Message: "invalid yaml",
+				Type:    "invalid_yaml",
+			})
+			continue
+		}
+
+		var gvk GVK
+		if kind_, ok := document["kind"]; ok {
+			if kind, ok := kind_.(string); ok {
+				gvk.kind = kind
+			}
+		}
+		if apiVersion_, ok := document["apiVersion"]; ok {
+			if apiVersion, ok := apiVersion_.(string); ok {
+				split := strings.Split(apiVersion, "/")
+				switch len(split) {
+				case 1:
+					gvk.version = split[0]
+				case 2:
+					gvk.group = split[0]
+					gvk.version = split[1]
+				}
+			}
+		}
+		if gvk.kind == "" || gvk.version == "" {
+			fmt.Fprintf(os.Stderr, "no kind and group found for document %s\n", document)
+			continue
+		}
+
+		schemaId := gvkToSchemaId(gvk.group, gvk.version, gvk.kind)
+		schemaBytes, err := os.ReadFile(filepath.Join(DB_DIR, schemaId+".json"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "load schema `%s: %s\n`", schemaId, err)
+		}
+		schemaLoader := gojsonschema.NewBytesLoader(schemaBytes)
+
+		jsonDocument, err := yaml.YAMLToJSON([]byte(documentString))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "convert yaml to json: %s\n", err)
+			continue
+		}
+		documentLoader := gojsonschema.NewBytesLoader(jsonDocument)
+
+		res, err := gojsonschema.Validate(schemaLoader, documentLoader)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "schema and/or document is invalid: %s\n", err)
+			continue
+		}
+
+		paths := yamlDocumentPaths([]byte(documentString))
+		for _, e := range res.Errors() {
+			field := e.Field()
+			if e.Type() == "additional_property_not_allowed" {
+				field = e.Field() + "." + e.Details()["property"].(string)
+			}
+			field = "." + field
+			range_, found := paths[field]
+			if !found {
+				panic(fmt.Sprintf("expected path `%s` to exist in the document. Available paths: %v. Error type: %s", field, paths, e.Type()))
+			}
+			errors = append(errors, ValidationError{
+				Range:   newRange(docPos.Start+range_.Start.Line, range_.Start.Char, docPos.Start+range_.End.Line, range_.End.Char),
+				Message: e.Description(),
+				Type:    e.Type(), // I've got life!
+			})
+		}
+	}
+	for _, e := range errors {
+		fmt.Printf("%s:%d:%s\n", filename, e.Range.Start.Line+1, e.Message)
+	}
+	return nil
+}
+
+type ValidationError struct {
+	Range   Range
+	Message string
+	Type    string
+}
+
+type Range struct{ Start, End Position } // zero-based, the start character is inclusive and the end character is exclusive
+type Position struct{ Line, Char int }   // zero-based
+
+func newRange(startLine, startChar, endLine, endChar int) Range {
+	return Range{
+		Start: Position{Line: startLine, Char: startChar},
+		End:   Position{Line: endLine, Char: endChar},
+	}
+}
+
+type lineRange struct{ Start, End int } // [Start, End), 0-indexed
+
+func getDocumentPositions(file string) []lineRange {
+	var ranges []lineRange
+	startLine := 0
+	lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
+	for i, line := range lines {
+		if line == "---" {
+			ranges = append(ranges, lineRange{
+				Start: startLine,
+				End:   i,
+			})
+			startLine = i + 1
+		} else if i == len(lines)-1 {
+			ranges = append(ranges, lineRange{
+				Start: startLine,
+				End:   i + 1,
+			})
+		}
+	}
+	return ranges
+}
+
+func yamlDocumentPaths(doc []byte) Paths {
+	astFile, err := yamlparser.ParseBytes([]byte(doc), 0)
+	if err != nil {
+		panic(fmt.Sprintf("expected a valid yaml document: %v", err))
+	}
+	if len(astFile.Docs) != 1 {
+		panic(fmt.Sprintf("expected 1 document, got %d", len(astFile.Docs)))
+	}
+	paths := Paths{}
+	ast.Walk(&paths, astFile.Docs[0])
+	return paths
+}
+
+type Paths map[string]Range
+
+var (
+	arrayPattern          = regexp.MustCompile(`\[(\d+)\]`)
+	endingIndex           = regexp.MustCompile(`\.(\d+)$`)
+	endingIndexInBrackets = regexp.MustCompile(`\[(\d+)\]$`)
+)
+
+func (p Paths) Visit(node ast.Node) ast.Visitor {
+	if node.Type() == ast.MappingValueType || node.Type() == ast.DocumentType {
+		return p
+	}
+	path := strings.TrimPrefix(node.GetPath(), "$")
+	if path == "" {
+		return p
+	}
+	path = arrayPattern.ReplaceAllString(path, ".$1")
+	if node.Type() == ast.MappingType && endingIndex.MatchString(path) {
+		// The path looks like spec.ports[1] here
+		// This is the `:` in the first element in an object array
+		// Not sure why it's only on the first one
+		// Use the parent path to compute the column
+		parent := endingIndex.ReplaceAllString(path, "")
+		var char int
+		for existingPath, pos := range p {
+			if existingPath == parent {
+				char = pos.Start.Char + 2 // NOTE: Assuming that lists are indented here
+			}
+		}
+		t := node.GetToken()
+		p[path] = Range{
+			Start: Position{
+				Line: t.Position.Line - 1,
+				Char: char,
+			},
+			End: Position{
+				Line: t.Position.Line - 1,
+				Char: char + 1,
+			},
+		}
+		return p
+	}
+	// Turn spec.ports[0].port into spec.ports.0.port
+	// path = arrayPattern.ReplaceAllString(path, ".$1")
+	if _, found := p[path]; found {
+		// Store the path to the key only, not the value
+		// Assumes that the key is always visited first, couldn't find a way to distinguish
+		// key nodes and value nodes
+		return p
+	}
+	t := node.GetToken()
+	p[path] = Range{
+		Start: Position{
+			Line: t.Position.Line - 1,
+			Char: t.Position.Column - 1,
+		},
+		End: Position{
+			Line: t.Position.Line - 1,
+			Char: t.Position.Column + len(t.Value) - 1,
+		},
+	}
+	return p
 }
 
 // func languageServer() {
@@ -683,25 +867,25 @@ func htmlDocs(docs []SchemaProperty, highlightProperty string) string {
 // 	os.Exit(1)
 // }
 
-func validateFile(contents string, store schema.KubernetesStore) ([]protocol.Diagnostic, error) {
-	errors := store.ValidateFile(contents)
-	diagnostics := []protocol.Diagnostic{}
-	for _, e := range errors {
-		diagnostics = append(diagnostics, protocol.Diagnostic{
-			Range: protocol.Range{
-				Start: protocol.Position{
-					Line:      uint32(e.Range.Start.Line),
-					Character: uint32(e.Range.Start.Char),
-				},
-				End: protocol.Position{
-					Line:      uint32(e.Range.End.Line),
-					Character: uint32(e.Range.End.Char),
-				},
-			},
-			Severity: protocol.DiagnosticSeverityError,
-			Source:   "yamlls",
-			Message:  e.Message,
-		})
-	}
-	return diagnostics, nil
-}
+// func validateFile(contents string, store schema.KubernetesStore) ([]protocol.Diagnostic, error) {
+// 	errors := store.ValidateFile(contents)
+// 	diagnostics := []protocol.Diagnostic{}
+// 	for _, e := range errors {
+// 		diagnostics = append(diagnostics, protocol.Diagnostic{
+// 			Range: protocol.Range{
+// 				Start: protocol.Position{
+// 					Line:      uint32(e.Range.Start.Line),
+// 					Character: uint32(e.Range.Start.Char),
+// 				},
+// 				End: protocol.Position{
+// 					Line:      uint32(e.Range.End.Line),
+// 					Character: uint32(e.Range.End.Char),
+// 				},
+// 			},
+// 			Severity: protocol.DiagnosticSeverityError,
+// 			Source:   "yamlls",
+// 			Message:  e.Message,
+// 		})
+// 	}
+// 	return diagnostics, nil
+// }
