@@ -162,7 +162,7 @@ func NewMux(log *slog.Logger, r io.Reader, w io.Writer) *Mux {
 		notificationHandlers: map[string]NotificationHandler{},
 		writer:               bufio.NewWriter(w),
 		writeLock:            &sync.Mutex{},
-		log:                  log,
+		Log:                  log,
 		error: func(err error) {
 			return
 		},
@@ -177,7 +177,7 @@ type Mux struct {
 	notificationHandlers map[string]NotificationHandler
 	writer               *bufio.Writer
 	writeLock            *sync.Mutex
-	log                  *slog.Logger
+	Log                  *slog.Logger
 	error                func(err error)
 }
 
@@ -225,14 +225,14 @@ func (m *Mux) Process() error {
 		}
 		if req.IsNotification() {
 			if req.Method != "exit" {
-				m.log.Warn("Dropping notification sent before initialization", slog.Any("req", req))
+				m.Log.Warn("Dropping notification sent before initialization", slog.Any("req", req))
 				continue
 			}
 			m.handleMessage(req)
 			continue
 		}
 		if req.Method != "initialize" {
-			m.log.Warn("The client sent a method before initialization", slog.Any("req", req))
+			m.Log.Warn("The client sent a method before initialization", slog.Any("req", req))
 			if err = m.write(NewResponseError(req.ID, ErrServerNotInitialized)); err != nil {
 				return err
 			}
@@ -241,7 +241,7 @@ func (m *Mux) Process() error {
 		m.handleMessage(req)
 		break
 	}
-	m.log.Info("Initialization complete")
+	m.Log.Info("Initialization complete")
 
 	sem := make(chan struct{}, m.concurrencyLimit)
 	for {
@@ -266,7 +266,7 @@ func (m *Mux) handleMessage(req Request) {
 }
 
 func (m *Mux) handleNotification(req Request) {
-	log := m.log.With(slog.String("method", req.Method))
+	log := m.Log.With(slog.String("method", req.Method))
 	nh, ok := m.notificationHandlers[req.Method]
 	if !ok {
 		log.Warn("No notification handler found")
@@ -279,7 +279,7 @@ func (m *Mux) handleNotification(req Request) {
 }
 
 func (m *Mux) handleRequestResponse(req Request) {
-	log := m.log.With(slog.Any("id", req.ID), slog.String("method", req.Method))
+	log := m.Log.With(slog.Any("id", req.ID), slog.String("method", req.Method))
 	if req.Method == "" {
 		// The method for window/showDocument is empty, nothing to handle on that response
 		return

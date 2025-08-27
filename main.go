@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,9 +13,13 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/slarwise/yamlls/internal/lsp"
+
 	yamlparser "github.com/goccy/go-yaml/parser"
 	"github.com/tidwall/gjson"
 	"github.com/xeipuuv/gojsonschema"
+	"go.lsp.dev/protocol"
+	"go.lsp.dev/uri"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -51,7 +56,9 @@ func main() {
 
 func run() error {
 	if len(os.Args) < 2 {
-		panic("TODO: start the language server")
+		if err := runLanguageServer(); err != nil {
+			return fmt.Errorf("run language server: %s", err)
+		}
 	} else {
 		subCommand, args := os.Args[1], os.Args[2:]
 		switch subCommand {
@@ -78,8 +85,13 @@ func run() error {
 				return fmt.Errorf("must provide the filename to validate")
 			}
 			file := args[0]
-			if err := validateFile(file); err != nil {
-				return fmt.Errorf("validate file `%s`: %s", file, err)
+			bytes, err := os.ReadFile(file)
+			if err != nil {
+				return fmt.Errorf("read `%s`: %s", file, err)
+			}
+			errors := validateFile(string(bytes))
+			for _, e := range errors {
+				fmt.Printf("%s:%d:%s\n", file, e.Range.Start.Line, e.Message)
 			}
 		case "refresh":
 			if err := refreshDatabase(); err != nil {
@@ -450,19 +462,15 @@ func htmlDocs(docs []SchemaProperty, highlightProperty string) string {
 	return output.String()
 }
 
-func validateFile(filename string) error {
-	bytes, err := os.ReadFile(filename)
-	if err != nil {
-		return fmt.Errorf("read file %s: %s", filename, err)
-	}
-	lines := strings.FieldsFunc(string(bytes), func(r rune) bool { return r == '\n' })
-	positions := getDocumentPositions(string(bytes))
+func validateFile(contents string) []ValidationError {
+	lines := strings.FieldsFunc(contents, func(r rune) bool { return r == '\n' })
+	positions := getDocumentPositions(contents)
 	var errors []ValidationError
 	for _, docPos := range positions {
 		documentString := strings.Join(lines[docPos.Start:docPos.End], "\n")
 
-		var document map[string]any
-		if err := yaml.Unmarshal([]byte(documentString), &document); err != nil {
+		gvk, ok := extractGvkFromDocument([]byte(documentString))
+		if !ok {
 			errors = append(errors, ValidationError{
 				Range: Range{
 					Start: Position{
@@ -480,26 +488,8 @@ func validateFile(filename string) error {
 			continue
 		}
 
-		var gvk GVK
-		if kind_, ok := document["kind"]; ok {
-			if kind, ok := kind_.(string); ok {
-				gvk.kind = kind
-			}
-		}
-		if apiVersion_, ok := document["apiVersion"]; ok {
-			if apiVersion, ok := apiVersion_.(string); ok {
-				split := strings.Split(apiVersion, "/")
-				switch len(split) {
-				case 1:
-					gvk.version = split[0]
-				case 2:
-					gvk.group = split[0]
-					gvk.version = split[1]
-				}
-			}
-		}
 		if gvk.kind == "" || gvk.version == "" {
-			fmt.Fprintf(os.Stderr, "no kind and group found for document %s\n", document)
+			fmt.Fprintf(os.Stderr, "no kind and group found for document %s\n", documentString)
 			continue
 		}
 
@@ -541,10 +531,7 @@ func validateFile(filename string) error {
 			})
 		}
 	}
-	for _, e := range errors {
-		fmt.Printf("%s:%d:%s\n", filename, e.Range.Start.Line+1, e.Message)
-	}
-	return nil
+	return errors
 }
 
 type ValidationError struct {
@@ -663,229 +650,335 @@ func (p Paths) Visit(node ast.Node) ast.Visitor {
 	return p
 }
 
-// func languageServer() {
-// 	logpath := filepath.Join(yamllsCacheDir, "log")
-// 	logfile, err := os.Create(logpath)
-// 	if err != nil {
-// 		slog.Error("Failed to create log output file", "error", err)
-// 		os.Exit(1)
-// 	}
+var exitChannel chan (int)
+var documentUpdates chan (protocol.TextDocumentItem)
+var filenameToContents map[string]string
+var m *lsp.Mux
 
-// 	kubernetesStore, err := schema.NewKubernetesStore()
-// 	if err != nil {
-// 		slog.Error("create kubernetes store", "err", err)
-// 		os.Exit(1)
-// 	}
+func runLanguageServer() error {
+	logpath := filepath.Join(CACHE_DIR, "log.json")
+	logfile, err := os.Create(logpath)
+	if err != nil {
+		return fmt.Errorf("create log file: %s", err)
+	}
+	defer logfile.Close()
+	logger = slog.New(slog.NewJSONHandler(logfile, nil))
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Error("panic", "recovered", r)
+		}
+	}()
 
-// 	defer logfile.Close()
-// 	logger = slog.New(slog.NewJSONHandler(logfile, nil))
-// 	defer func() {
-// 		if r := recover(); r != nil {
-// 			logger.Error("panic", "recovered", r)
-// 		}
-// 	}()
+	m = lsp.NewMux(logger, os.Stdin, os.Stdout)
 
-// 	m := lsp.NewMux(logger, os.Stdin, os.Stdout)
+	exitChannel = make(chan int, 1)
+	documentUpdates = make(chan protocol.TextDocumentItem, 10)
+	filenameToContents = map[string]string{}
 
-// 	filenameToContents := map[string]string{}
+	m.HandleMethod(protocol.MethodInitialize, lspInitialize)
+	m.HandleNotification(protocol.MethodInitialized, lspInitialized)
+	m.HandleMethod(protocol.MethodShutdown, lspShutdown)
+	m.HandleNotification(protocol.MethodExit, lspExit)
+	m.HandleNotification(protocol.MethodTextDocumentDidOpen, lspTextDocumentDidOpen)
+	m.HandleNotification(protocol.MethodTextDocumentDidChange, lspTextDocumentDidChange)
+	m.HandleMethod(protocol.MethodTextDocumentHover, lspTextDocumentHover)
+	m.HandleMethod(protocol.MethodTextDocumentCompletion, lspTextDocumentCompletion)
+	m.HandleMethod(protocol.MethodTextDocumentCodeAction, lspMethodTextDocumentCodeAction)
+	m.HandleMethod(protocol.MethodWorkspaceExecuteCommand, lspMethodWorkspaceExecuteCommand)
 
-// 	m.HandleMethod("initialize", func(params json.RawMessage) (any, error) {
-// 		var initializeParams protocol.InitializeParams
-// 		if err = json.Unmarshal(params, &initializeParams); err != nil {
-// 			return nil, err
-// 		}
-// 		logger.Info("Received initialize request", "params", initializeParams)
-// 		// TODO: Support filenameOverrides
+	go func() {
+		for doc := range documentUpdates {
+			filenameToContents[doc.URI.Filename()] = doc.Text
+			errors := validateFile(doc.Text)
+			var diagnostics []protocol.Diagnostic
+			for _, e := range errors {
+				diagnostics = append(diagnostics, protocol.Diagnostic{
+					Range: protocol.Range{
+						Start: protocol.Position{
+							Line:      uint32(e.Range.Start.Line),
+							Character: uint32(e.Range.Start.Char),
+						},
+						End: protocol.Position{
+							Line:      uint32(e.Range.End.Line),
+							Character: uint32(e.Range.End.Char),
+						},
+					},
+					Severity: protocol.DiagnosticSeverityError,
+					Source:   "yamlls",
+					Message:  e.Message,
+				})
+			}
+			m.Notify(protocol.MethodTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
+				URI:         doc.URI,
+				Version:     uint32(doc.Version),
+				Diagnostics: diagnostics,
+			})
+		}
+	}()
 
-// 		result := protocol.InitializeResult{
-// 			Capabilities: protocol.ServerCapabilities{
-// 				TextDocumentSync:   protocol.TextDocumentSyncKindFull,
-// 				HoverProvider:      true,
-// 				CodeActionProvider: true,
-// 				ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
-// 					Commands: []string{"open-docs"},
-// 				},
-// 			},
-// 			ServerInfo: &protocol.ServerInfo{Name: "yamlls"},
-// 		}
-// 		return result, nil
-// 	})
+	logger.Info("Handler set up", "log_path", logpath)
 
-// 	m.HandleNotification("initialized", func(params json.RawMessage) error {
-// 		logger.Info("Receivied initialized notification", "params", params)
-// 		return nil
-// 	})
+	go func() {
+		if err := m.Process(); err != nil {
+			logger.Error("Processing stopped", "error", err)
+			os.Exit(1)
+		}
+	}()
 
-// 	m.HandleMethod("shutdown", func(params json.RawMessage) (any, error) {
-// 		logger.Info("Received shutdown request")
-// 		return nil, nil
-// 	})
+	<-exitChannel
 
-// 	exitChannel := make(chan int, 1)
-// 	m.HandleNotification("exit", func(params json.RawMessage) error {
-// 		logger.Info("Received exit notification")
-// 		exitChannel <- 1
-// 		return nil
-// 	})
+	logger.Info("Server exited")
 
-// 	documentUpdates := make(chan protocol.TextDocumentItem, 10)
-// 	go func() {
-// 		for doc := range documentUpdates {
-// 			filenameToContents[doc.URI.Filename()] = doc.Text
-// 			diagnostics, err := validateFile(doc.Text, kubernetesStore)
-// 			if err != nil {
-// 				logger.Error("validate file", "err", err)
-// 			}
-// 			m.Notify(protocol.MethodTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
-// 				URI:         doc.URI,
-// 				Version:     uint32(doc.Version),
-// 				Diagnostics: diagnostics,
-// 			})
-// 		}
-// 	}()
+	return nil
+}
 
-// 	m.HandleNotification(protocol.MethodTextDocumentDidOpen, func(rawParams json.RawMessage) error {
-// 		logger.Info("Received TextDocument/didOpen notification")
-// 		var params protocol.DidOpenTextDocumentParams
-// 		if err := json.Unmarshal(rawParams, &params); err != nil {
-// 			return err
-// 		}
-// 		documentUpdates <- params.TextDocument
-// 		return nil
-// 	})
+func lspInitialize(params json.RawMessage) (any, error) {
+	var initializeParams protocol.InitializeParams
+	if err := json.Unmarshal(params, &initializeParams); err != nil {
+		return nil, err
+	}
+	logger.Info("Received initialize request", "params", initializeParams)
+	// TODO: Support filenameOverrides
 
-// 	m.HandleNotification(protocol.MethodTextDocumentDidChange, func(rawParams json.RawMessage) error {
-// 		logger.Info("Received textDocument/didChange notification")
-// 		var params protocol.DidChangeTextDocumentParams
-// 		if err := json.Unmarshal(rawParams, &params); err != nil {
-// 			return err
-// 		}
-// 		documentUpdates <- protocol.TextDocumentItem{URI: params.TextDocument.URI, Version: params.TextDocument.Version, Text: params.ContentChanges[0].Text}
-// 		return nil
-// 	})
+	result := protocol.InitializeResult{
+		Capabilities: protocol.ServerCapabilities{
+			TextDocumentSync:   protocol.TextDocumentSyncKindFull,
+			HoverProvider:      true,
+			CodeActionProvider: true,
+			ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
+				Commands: []string{"open-docs"},
+			},
+		},
+		ServerInfo: &protocol.ServerInfo{Name: "yamlls"},
+	}
+	return result, nil
+}
 
-// 	m.HandleMethod("textDocument/hover", func(rawParams json.RawMessage) (any, error) {
-// 		logger.Info("Received textDocument/hover request")
-// 		var params protocol.HoverParams
-// 		if err := json.Unmarshal(rawParams, &params); err != nil {
-// 			return nil, err
-// 		}
-// 		contents := filenameToContents[params.TextDocument.URI.Filename()]
-// 		documentation, err := kubernetesStore.DocumentationAtCursor(contents, int(params.Position.Line), int(params.Position.Character))
-// 		if err != nil {
-// 			logger.Error("failed to get description", "line", params.Position.Line, "char", params.Position.Character, "err", err)
-// 			return nil, nil
-// 		} else if documentation.Description == "" {
-// 			return nil, nil
-// 		}
+func lspInitialized(params json.RawMessage) error {
+	logger.Info("Received shutdown request")
+	return nil
+}
 
-// 		return protocol.Hover{
-// 			Contents: protocol.MarkupContent{
-// 				Kind:  protocol.PlainText,
-// 				Value: documentation.Description,
-// 			},
-// 		}, nil
-// 	})
+func lspShutdown(params json.RawMessage) (any, error) {
+	logger.Info("Received shutdown request")
+	return nil, nil
+}
 
-// 	m.HandleMethod("textDocument/completion", func(rawParams json.RawMessage) (any, error) {
-// 		logger.Info("Receiver textDocument/completion request, not supported")
-// 		return nil, nil
-// 	})
+func lspExit(params json.RawMessage) error {
+	logger.Info("Received exit notification")
+	exitChannel <- 1
+	return nil
+}
 
-// 	m.HandleMethod(protocol.MethodTextDocumentCodeAction, func(rawParams json.RawMessage) (any, error) {
-// 		logger.Info("Received textDocument/codeAction request, not supported")
-// 		return nil, nil
-// 	})
+func lspTextDocumentDidOpen(rawParams json.RawMessage) error {
+	logger.Info("Received TextDocument/didOpen notification")
+	var params protocol.DidOpenTextDocumentParams
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return err
+	}
+	documentUpdates <- params.TextDocument
+	return nil
+}
 
-// 	m.HandleMethod(protocol.MethodTextDocumentCodeAction, func(rawParams json.RawMessage) (any, error) {
-// 		logger.Info(fmt.Sprintf("Received %s request", protocol.MethodTextDocumentCodeAction))
-// 		var params protocol.CodeActionParams
-// 		if err := json.Unmarshal(rawParams, &params); err != nil {
-// 			return nil, err
-// 		}
-// 		contents := filenameToContents[params.TextDocument.URI.Filename()]
-// 		documentation, found := kubernetesStore.HtmlDocumentation(contents, int(params.Range.Start.Line), int(params.Range.Start.Character))
-// 		if !found {
-// 			return "", errors.New("no schema found")
-// 		}
-// 		filename := filepath.Join(cacheDir, "docs.html")
-// 		if err := os.WriteFile(filename, []byte(documentation), 0755); err != nil {
-// 			slog.Error("write html documentation to file", "err", err, "file", filename)
-// 			return "", errors.New("failed to write docs to file")
-// 		}
-// 		htmlDocsUri := "file://" + filename
-// 		response := []protocol.CodeAction{
-// 			{
-// 				Title: "Open documentation",
-// 				Command: &protocol.Command{
-// 					Title:     "Open documentation",
-// 					Command:   "open-docs",
-// 					Arguments: []any{htmlDocsUri},
-// 				},
-// 			},
-// 		}
-// 		return response, nil
-// 	})
+func lspTextDocumentDidChange(rawParams json.RawMessage) error {
+	logger.Info("Received textDocument/didChange notification")
+	var params protocol.DidChangeTextDocumentParams
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return err
+	}
+	documentUpdates <- protocol.TextDocumentItem{URI: params.TextDocument.URI, Version: params.TextDocument.Version, Text: params.ContentChanges[0].Text}
+	return nil
+}
 
-// 	m.HandleMethod(protocol.MethodWorkspaceExecuteCommand, func(rawParams json.RawMessage) (any, error) {
-// 		logger.Info(fmt.Sprintf("Received %s request", protocol.MethodWorkspaceExecuteCommand))
-// 		var params protocol.ExecuteCommandParams
-// 		if err := json.Unmarshal(rawParams, &params); err != nil {
-// 			return nil, err
-// 		}
-// 		logger.Info("Received command", "command", params.Command, "args", params.Arguments)
-// 		switch params.Command {
-// 		case "open-docs":
-// 			if len(params.Arguments) != 1 {
-// 				return "", fmt.Errorf("Must provide 1 argument to open-docs, the uri")
-// 			}
-// 			viewerURL := params.Arguments[0].(string)
-// 			uri := uri.URI(viewerURL)
-// 			showDocumentParams := protocol.ShowDocumentParams{
-// 				URI:       uri,
-// 				External:  true,
-// 				TakeFocus: true,
-// 			}
-// 			m.Request("window/showDocument", showDocumentParams)
-// 		default:
-// 			return "", fmt.Errorf("Command not found %s", params.Command)
-// 		}
-// 		return "", nil
-// 	})
+func lspTextDocumentHover(rawParams json.RawMessage) (any, error) {
+	logger.Info("Received textDocument/hover request")
+	var params protocol.HoverParams
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
+	}
+	contents := filenameToContents[params.TextDocument.URI.Filename()]
 
-// 	logger.Info("Handler set up", "log_path", logpath)
+	documentPositions := getDocumentPositions(contents)
+	var currentDocument string
+	var lineInDocument int
+	for _, r := range documentPositions {
+		if r.Start <= int(params.Position.Line) && int(params.Position.Line) < r.End {
+			lines := strings.FieldsFunc(contents, func(r rune) bool { return r == '\n' })
+			currentDocument = strings.Join(lines[r.Start:r.End], "\n")
+			lineInDocument = int(params.Position.Line) - r.Start
+		}
+	}
+	if currentDocument == "" {
+		return nil, nil
+	}
+	paths := yamlDocumentPaths([]byte(currentDocument))
+	pathAtCursor, found := pathAtCursor(paths, lineInDocument, int(params.Position.Character))
+	if !found {
+		return nil, nil
+	}
 
-// 	go func() {
-// 		if err := m.Process(); err != nil {
-// 			logger.Error("Processing stopped", "error", err)
-// 			os.Exit(1)
-// 		}
-// 	}()
+	gvk, ok := extractGvkFromDocument([]byte(currentDocument))
+	if !ok {
+		return nil, errors.New("no kind and apiVersion found")
+	}
+	schemaId := gvkToSchemaId(gvk.group, gvk.version, gvk.kind)
+	schema, err := os.ReadFile(filepath.Join(DB_DIR, schemaId+".json"))
+	if err != nil {
+		return nil, fmt.Errorf("no schema found for %s", schemaId)
+	}
 
-// 	<-exitChannel
-// 	logger.Info("Server exited")
-// 	os.Exit(1)
-// }
+	docs, err := docs(schema)
+	if err != nil {
+		return nil, fmt.Errorf("create docs: %s", err)
+	}
 
-// func validateFile(contents string, store schema.KubernetesStore) ([]protocol.Diagnostic, error) {
-// 	errors := store.ValidateFile(contents)
-// 	diagnostics := []protocol.Diagnostic{}
-// 	for _, e := range errors {
-// 		diagnostics = append(diagnostics, protocol.Diagnostic{
-// 			Range: protocol.Range{
-// 				Start: protocol.Position{
-// 					Line:      uint32(e.Range.Start.Line),
-// 					Character: uint32(e.Range.Start.Char),
-// 				},
-// 				End: protocol.Position{
-// 					Line:      uint32(e.Range.End.Line),
-// 					Character: uint32(e.Range.End.Char),
-// 				},
-// 			},
-// 			Severity: protocol.DiagnosticSeverityError,
-// 			Source:   "yamlls",
-// 			Message:  e.Message,
-// 		})
-// 	}
-// 	return diagnostics, nil
-// }
+	// Turn spec.ports.0.name into spec.ports[].name
+	pathAtCursor = arrayPath.ReplaceAllString(pathAtCursor, "[]")
+	for _, property := range docs {
+		if property.Path == pathAtCursor {
+			if property.Description == "" {
+				break
+			}
+			return protocol.Hover{
+				Contents: protocol.MarkupContent{
+					Kind:  protocol.PlainText,
+					Value: property.Description,
+				},
+			}, nil
+		}
+	}
+	return nil, nil
+}
+
+func lspTextDocumentCompletion(rawParams json.RawMessage) (any, error) {
+	logger.Info("Receiver textDocument/completion request, not supported")
+	return nil, nil
+}
+
+var arrayPath = regexp.MustCompile(`\.\d+`)
+
+func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
+	logger.Info(fmt.Sprintf("Received %s request", protocol.MethodTextDocumentCodeAction))
+	var params protocol.CodeActionParams
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
+	}
+	contents := filenameToContents[params.TextDocument.URI.Filename()]
+
+	documentPositions := getDocumentPositions(contents)
+	var currentDocument string
+	var lineInDocument int
+	for _, r := range documentPositions {
+		if r.Start <= int(params.Range.Start.Line) && int(params.Range.Start.Line) < r.End {
+			lines := strings.FieldsFunc(contents, func(r rune) bool { return r == '\n' })
+			currentDocument = strings.Join(lines[r.Start:r.End], "\n")
+			lineInDocument = int(params.Range.Start.Line) - r.Start
+		}
+	}
+	if currentDocument == "" {
+		return nil, nil
+	}
+	paths := yamlDocumentPaths([]byte(currentDocument))
+	pathAtCursor, found := pathAtCursor(paths, lineInDocument, int(params.Range.Start.Character))
+	if found {
+		// Turn spec.ports.0.name into spec.ports[].name
+		// TODO: pathAtCursor should return a good path
+		pathAtCursor = arrayPath.ReplaceAllString(pathAtCursor, "[]")
+	}
+
+	gvk, ok := extractGvkFromDocument([]byte(currentDocument))
+	if !ok {
+		return nil, errors.New("no kind and apiVersion found")
+	}
+	schemaId := gvkToSchemaId(gvk.group, gvk.version, gvk.kind)
+	schema, err := os.ReadFile(filepath.Join(DB_DIR, schemaId+".json"))
+	if err != nil {
+		return nil, fmt.Errorf("no schema found for %s", schemaId)
+	}
+
+	docs, err := docs(schema)
+	if err != nil {
+		return nil, fmt.Errorf("create docs: %s", err)
+	}
+	html := htmlDocs(docs, pathAtCursor)
+
+	filename := filepath.Join(CACHE_DIR, "docs.html")
+	if err := os.WriteFile(filename, []byte(html), 0755); err != nil {
+		slog.Error("write html documentation to file", "err", err, "file", filename)
+		return "", errors.New("failed to write docs to file")
+	}
+	htmlDocsUri := "file://" + filename
+	response := []protocol.CodeAction{
+		{
+			Title: "Open documentation",
+			Command: &protocol.Command{
+				Title:     "Open documentation",
+				Command:   "open-docs",
+				Arguments: []any{htmlDocsUri},
+			},
+		},
+	}
+	return response, nil
+}
+
+func lspMethodWorkspaceExecuteCommand(rawParams json.RawMessage) (any, error) {
+	logger.Info(fmt.Sprintf("Received %s request", protocol.MethodWorkspaceExecuteCommand))
+	var params protocol.ExecuteCommandParams
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
+	}
+	logger.Info("Received command", "command", params.Command, "args", params.Arguments)
+	switch params.Command {
+	case "open-docs":
+		if len(params.Arguments) != 1 {
+			return "", fmt.Errorf("Must provide 1 argument to open-docs, the uri")
+		}
+		viewerURL := params.Arguments[0].(string)
+		uri := uri.URI(viewerURL)
+		showDocumentParams := protocol.ShowDocumentParams{
+			URI:       uri,
+			External:  true,
+			TakeFocus: true,
+		}
+		m.Request("window/showDocument", showDocumentParams)
+	default:
+		return "", fmt.Errorf("Command not found %s", params.Command)
+	}
+	return "", nil
+}
+
+// Return false if yaml is invalid
+func extractGvkFromDocument(docBytes []byte) (GVK, bool) {
+	var document map[string]any
+	if err := yaml.Unmarshal(docBytes, &document); err != nil {
+		return GVK{}, false
+	}
+	var gvk GVK
+	if kind_, ok := document["kind"]; ok {
+		if kind, ok := kind_.(string); ok {
+			gvk.kind = kind
+		}
+	}
+	if apiVersion_, ok := document["apiVersion"]; ok {
+		if apiVersion, ok := apiVersion_.(string); ok {
+			split := strings.Split(apiVersion, "/")
+			switch len(split) {
+			case 1:
+				gvk.version = split[0]
+			case 2:
+				gvk.group = split[0]
+				gvk.version = split[1]
+			}
+		}
+	}
+	return gvk, true
+}
+
+func pathAtCursor(paths Paths, line, char int) (string, bool) {
+	for path, r := range paths {
+		if r.Start.Line == line && r.Start.Char <= char && char < r.End.Char {
+			return path, true
+		}
+	}
+	return "", false
+}
