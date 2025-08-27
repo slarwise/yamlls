@@ -127,12 +127,12 @@ func refreshDatabase() error {
 				continue
 			}
 			gvk := definition.GroupVersionKind[0]
-			baseName := gvk.Kind + "-"
+			group := ""
 			if gvk.Group != "" {
-				group := strings.Split(gvk.Group, ".")[0]
-				baseName += group + "-"
+				group = strings.Split(gvk.Group, ".")[0]
 			}
-			baseName += gvk.Version + ".json"
+			schemaId := gvkToSchemaId(group, gvk.Version, gvk.Kind)
+			baseName := schemaId + ".json"
 			schemaUrl := fmt.Sprintf("%s/%s", NATIVE_SCHEMAS_BASE_URL, strings.ToLower(baseName))
 			schema, err := httpGet(schemaUrl)
 			if err != nil {
@@ -173,13 +173,13 @@ func refreshDatabase() error {
 				if err != nil {
 					return fmt.Errorf("get schema: %s", err)
 				}
-				baseName := d.Kind + "-"
 				split := strings.Split(d.ApiVersion, "/")
 				if len(split) != 2 {
 					return fmt.Errorf("expected apiVersion to have exactly one `/`, got %s", d.ApiVersion)
 				}
 				group, version := split[0], split[1]
-				baseName += group + "-" + version + ".json"
+				schemaId := gvkToSchemaId(d.Kind, group, version)
+				baseName := schemaId + ".json"
 				filename := filepath.Join(DB_DIR, baseName)
 				if err := os.WriteFile(filename, body, 0644); err != nil {
 					return fmt.Errorf("write schema to %s: %s", filename, err)
@@ -259,7 +259,7 @@ func showDocs(kind string) error {
 	default:
 		found := false
 		for _, id := range matches {
-			gvk := parseSchemaId(id)
+			gvk := schemaIdToGvk(id)
 			// Favor native schemas. These have no group name or one without a dot
 			if gvk.group == "" || strings.Count(gvk.group, ".") == 0 {
 				resolvedId = id
@@ -281,7 +281,7 @@ func showDocs(kind string) error {
 
 type GVK struct{ group, version, kind string }
 
-func parseSchemaId(id string) GVK {
+func schemaIdToGvk(id string) GVK {
 	id = strings.TrimSuffix(id, ".json")
 	split := strings.Split(id, "-")
 	gvk := GVK{kind: split[0]}
@@ -292,6 +292,15 @@ func parseSchemaId(id string) GVK {
 		gvk.version = split[2]
 	}
 	return gvk
+}
+
+func gvkToSchemaId(group, version, kind string) string {
+	id := kind + "-"
+	if group != "" {
+		id += group + "-"
+	}
+	id += version
+	return id
 }
 
 type Schema struct {
