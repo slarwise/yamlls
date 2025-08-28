@@ -516,13 +516,17 @@ func validateFile(contents string) []ValidationError {
 
 		paths := yamlDocumentPaths([]byte(documentString))
 		for _, e := range res.Errors() {
-			field := e.Field()
+			field := e.Field() // The root here is (root)
 			if e.Type() == "additional_property_not_allowed" {
-				field = e.Field() + "." + e.Details()["property"].(string)
+				field = field + "." + e.Details()["property"].(string)
 			}
 			field = "." + field
+			if field == ".(root)" {
+				field = "."
+			}
 			range_, found := paths[field]
 			if !found {
+				// expected path `.(root)` to exist in the document. Available paths: map[.apiVersion:{{1 0} {1 10}} .kind:{{0 0} {0 4}} .metadata:{{2 0} {2 8}} .metadata.name:{{3 2} {3 6}}]. Error type: required\n
 				panic(fmt.Sprintf("expected path `%s` to exist in the document. Available paths: %v. Error type: %s", field, paths, e.Type()))
 			}
 			errors = append(errors, ValidationError{
@@ -601,7 +605,7 @@ func (p Paths) Visit(node ast.Node) ast.Visitor {
 	}
 	path := strings.TrimPrefix(node.GetPath(), "$")
 	if path == "" {
-		return p
+		path = "."
 	}
 	path = arrayPattern.ReplaceAllString(path, ".$1")
 	if node.Type() == ast.MappingType && endingIndex.MatchString(path) {
@@ -638,6 +642,10 @@ func (p Paths) Visit(node ast.Node) ast.Visitor {
 		return p
 	}
 	t := node.GetToken()
+	if path == "." {
+		p[path] = Range{}
+		return p
+	}
 	p[path] = Range{
 		Start: Position{
 			Line: t.Position.Line - 1,
@@ -756,7 +764,7 @@ func lspInitialize(params json.RawMessage) (any, error) {
 }
 
 func lspInitialized(params json.RawMessage) error {
-	logger.Info("Received shutdown request")
+	logger.Info("Receivied initialized notification")
 	return nil
 }
 
