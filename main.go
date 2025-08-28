@@ -144,18 +144,18 @@ func refreshDatabase() error {
 				continue
 			}
 			gvk := definition.GroupVersionKind[0]
-			group := ""
-			if gvk.Group != "" {
-				group = strings.Split(gvk.Group, ".")[0]
-			}
+			group := gvk.Group
+			groupFirstPart := strings.Split(gvk.Group, ".")[0]
 			schemaId := gvkToSchemaId(group, gvk.Version, gvk.Kind)
-			baseName := schemaId + ".json"
+			// NOTE: We want the group in schema id to be the full group, e.g. `networking.k8s.io`
+			//       But the group in the filename in the git repo is just `networking`
+			baseName := strings.Replace(schemaId, group, groupFirstPart, 1) + ".json"
 			schemaUrl := fmt.Sprintf("%s/%s", NATIVE_SCHEMAS_BASE_URL, strings.ToLower(baseName))
 			schema, err := httpGet(schemaUrl)
 			if err != nil {
 				return fmt.Errorf("get schema: %s", err)
 			}
-			filename := filepath.Join(DB_DIR, baseName)
+			filename := filepath.Join(DB_DIR, schemaId+".json")
 			if err := os.WriteFile(filename, schema, 0644); err != nil {
 				return fmt.Errorf("write schema to %s: %s", filename, err)
 			}
