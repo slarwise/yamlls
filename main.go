@@ -703,7 +703,7 @@ func runLanguageServer() error {
 		for doc := range documentUpdates {
 			filenameToContents[doc.URI.Filename()] = doc.Text
 			errors := validateFile(doc.Text)
-			var diagnostics []protocol.Diagnostic
+			diagnostics := []protocol.Diagnostic{}
 			for _, e := range errors {
 				diagnostics = append(diagnostics, protocol.Diagnostic{
 					Range: protocol.Range{
