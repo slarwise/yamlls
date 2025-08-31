@@ -2,129 +2,175 @@ package main
 
 import (
 	"testing"
-
-	"github.com/slarwise/yamlls/pkg/schema"
-	"go.lsp.dev/protocol"
 )
 
-// TODO: Not really a reason to test this since it just wraps
-// schema.ValidateFile. Merge these tests with schema_test
 func TestValidateFile(t *testing.T) {
-	store, err := schema.NewKubernetesStore()
-	if err != nil {
-		t.Fatalf("unexepcted error: %v", err)
-	}
 	tests := map[string]struct {
-		contents    string
-		diagnostics []protocol.Diagnostic
+		contents string
+		errors   []ValidationError
 	}{
-		"valid": {
-			contents: `apiVersion: apps/v1
-kind: Deployment
-`,
-			diagnostics: nil,
-		},
-		"invalid-yaml": {
-			contents: `apiVersion: v1
-metadata: {
-`,
-			diagnostics: []protocol.Diagnostic{
-				{
-					Range: protocol.Range{
-						Start: protocol.Position{Line: 0, Character: 0},
-						End:   protocol.Position{Line: 2, Character: 0},
-					},
-					Severity: protocol.DiagnosticSeverityError,
-				},
-			},
-		},
-		"invalid-according-to-schema": {
-			contents: `apiVersion: v1
-kind: Service
-spec:
-  asdf: hej
-`,
-			diagnostics: []protocol.Diagnostic{
-				{
-					Range: protocol.Range{
-						Start: protocol.Position{Line: 3, Character: 2},
-						End:   protocol.Position{Line: 3, Character: 6},
-					},
-					Severity: protocol.DiagnosticSeverityError,
-				},
-			},
-		},
-		"two-documents": {
-			contents: `apiVersion: v1
-kind: Namespace
+		"one-document/valid": {
+			contents: `kind: Ingress
+apiVersion: networking.k8s.io/v1
 metadata:
-  name: mynamespace
+  name: myingress
+spec:
+  rules:
+    - host: example.com
+      http:
+        paths:
+          - path: /
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: myapp
+`,
+			errors: nil,
+		},
+		"one-document/invalid-yaml": {
+			contents: `kind: Ingress
+apiVersion: networking.k8s.io/v1
+spec: [
+`,
+			errors: []ValidationError{
+				{
+					Range:    newRange(0, 0, 3, 0),
+					Type:     "invalid_yaml",
+					Severity: SEVERITY_ERROR,
+				},
+			},
+		},
+		"one-document/no-schema-found": {
+			contents: `kind: Ingress
+apiVersion: does-not-exist
+`,
+			errors: []ValidationError{
+				{
+					Range:    newRange(0, 0, 0, 0),
+					Type:     "no_schema_found",
+					Severity: SEVERITY_WARN,
+				},
+			},
+		},
+		"two-documents/valid": {
+			contents: `kind: Ingress
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: myingress
+spec:
+  rules:
+    - host: example.com
+      http:
+        paths:
+          - path: /
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: myapp
 ---
+kind: Service
 apiVersion: v1
-kind: Service
-spec:
-  asdf: hej
-`,
-			diagnostics: []protocol.Diagnostic{
-				{
-					Range: protocol.Range{
-						Start: protocol.Position{Line: 8, Character: 2},
-						End:   protocol.Position{Line: 8, Character: 6},
-					},
-					Severity: protocol.DiagnosticSeverityError,
-				},
-			},
-		},
-		"error-in-array": {
-			contents: `apiVersion: v1
-kind: Service
 metadata:
-  name: hej
+  name: myapp
 spec:
   ports:
-    - por: 8080
-      name: asdf
-    - port: 3000
-      nam: hej
+    - port: 8080
+      name: http
 `,
-			diagnostics: []protocol.Diagnostic{
+			errors: nil,
+		},
+		"two-documents/invalid-yaml": {
+			contents: `kind: Ingress
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: myingress
+spec:
+  rules:
+    - host: example.com
+      http:
+        paths:
+          - path: /
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: myapp
+---
+kind: [
+apiVersion: v1
+metadata:
+  name: myapp
+spec:
+  ports:
+    - port: 8080
+      name: http
+`,
+			errors: []ValidationError{
 				{
-					Range: protocol.Range{
-						Start: protocol.Position{Line: 6, Character: 4},
-						End:   protocol.Position{Line: 6, Character: 5},
-					},
-					Severity: protocol.DiagnosticSeverityError,
+					Range:    newRange(15, 0, 23, 0),
+					Type:     "invalid_yaml",
+					Severity: SEVERITY_ERROR,
 				},
+			},
+		},
+		"two-document/no-schema-found": {
+			contents: `kind: Ingress
+apiVersion: does-not-exist
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: myapp
+spec:
+  ports:
+    - port: 8080
+      name: http
+`,
+			errors: []ValidationError{
 				{
-					Range: protocol.Range{
-						Start: protocol.Position{Line: 6, Character: 6},
-						End:   protocol.Position{Line: 6, Character: 9},
-					},
-					Severity: protocol.DiagnosticSeverityError,
+					Range:    newRange(0, 0, 0, 0),
+					Type:     "no_schema_found",
+					Severity: SEVERITY_WARN,
 				},
+			},
+		},
+		"one-document/no-kind-and-apiVersion": {
+			contents: `hej: du
+`,
+			errors: nil,
+		},
+		"one-document/additional-property": {
+			contents: `kind: Ingress
+apiVersion: networking.k8s.io/v1
+hej: du
+`,
+			errors: []ValidationError{
 				{
-					Range: protocol.Range{
-						Start: protocol.Position{Line: 9, Character: 6},
-						End:   protocol.Position{Line: 9, Character: 9},
-					},
-					Severity: protocol.DiagnosticSeverityError,
+					Range:    newRange(2, 0, 2, 3),
+					Type:     "additional_property_not_allowed",
+					Severity: SEVERITY_ERROR,
 				},
 			},
 		},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			diagnostics, err := validateFile(test.contents, store)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
+			errors, fail := validateFile(test.contents)
+			if fail != VALIDATION_FAILURE_REASON_NOT_A_FAILURE {
+				t.Fatalf("expected validation to work, got %s", fail)
 			}
-			if len(diagnostics) != len(test.diagnostics) {
-				t.Fatalf("Expected %d diagnostics, got %d", len(test.diagnostics), len(diagnostics))
+			if len(errors) != len(test.errors) {
+				t.Fatalf("expected %d errors, got %v", len(test.errors), errors)
 			}
-			for i, d := range diagnostics {
-				expected := test.diagnostics[i]
-				if d.Range != expected.Range {
-					t.Fatalf("expected range to be `%v`, got `%v`", expected.Range, d.Range)
+			for i := range errors {
+				expectedError := test.errors[i]
+				if errors[i].Type != expectedError.Type {
+					t.Fatalf("expected type `%s`, got `%s`", expectedError.Type, errors[i].Type)
+				}
+				if errors[i].Range != expectedError.Range {
+					t.Fatalf("expected range %v, got %v", expectedError.Range, errors[i].Range)
+				}
+				if errors[i].Severity != expectedError.Severity {
+					t.Fatalf("expected severity %v, got %v", expectedError.Severity, errors[i].Severity)
 				}
 			}
 		})

@@ -522,9 +522,10 @@ func validateFile(contents string) ([]ValidationError, ValidationFailureReason) 
 				validationErrors = append(validationErrors, ValidationError{
 					Range:    newRange(docPos.Start, 0, docPos.Start, 0),
 					Message:  fmt.Sprintf("no schema found for %s %s", gvk.kind, apiVersion),
-					Type:     "",
+					Type:     "no_schema_found",
 					Severity: SEVERITY_WARN,
 				})
+				continue
 			} else {
 				return nil, VALIDATION_FAILURE_REASON_READ_SCHEMA
 			}
@@ -558,7 +559,6 @@ func validateFile(contents string) ([]ValidationError, ValidationFailureReason) 
 			}
 			range_, found := paths[field]
 			if !found {
-				// expected path `.(root)` to exist in the document. Available paths: map[.apiVersion:{{1 0} {1 10}} .kind:{{0 0} {0 4}} .metadata:{{2 0} {2 8}} .metadata.name:{{3 2} {3 6}}]. Error type: required\n
 				panic(fmt.Sprintf("expected path `%s` to exist in the document. Available paths: %v. Error type: %s", field, paths, e.Type()))
 			}
 			validationErrors = append(validationErrors, ValidationError{
