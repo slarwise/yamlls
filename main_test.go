@@ -1,6 +1,8 @@
 package main
 
 import (
+	_ "embed"
+	"encoding/json"
 	"testing"
 )
 
@@ -171,6 +173,424 @@ hej: du
 				}
 				if errors[i].Severity != expectedError.Severity {
 					t.Fatalf("expected severity %v, got %v", expectedError.Severity, errors[i].Severity)
+				}
+			}
+		})
+	}
+}
+
+func TestGetDocumentPositions(t *testing.T) {
+	tests := map[string]struct {
+		file   string
+		ranges []lineRange
+	}{
+		"one-doc": {
+			file: `hej: du
+`,
+			ranges: []lineRange{{0, 1}},
+		},
+		"one-doc-no-trailing-new-line": {
+			file:   `hej: du`,
+			ranges: []lineRange{{0, 1}},
+		},
+		"two-docs": {
+			file: `hej: du
+jag: heter
+---
+arvid: hej
+what-if: the joker
+was: blue
+`,
+			ranges: []lineRange{
+				{0, 2},
+				{3, 6},
+			},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			ranges := getDocumentPositions(test.file)
+			if len(ranges) != len(test.ranges) {
+				t.Fatalf("Expected %d ranges, got %d", test.ranges, ranges)
+			}
+			for i, r := range ranges {
+				if r != test.ranges[i] {
+					t.Fatalf("expected `%v`, got `%v`", test.ranges, r)
+				}
+			}
+		})
+	}
+}
+
+//go:embed testdata/oneOf.json
+var oneOf string
+
+//go:embed testdata/anyOf.json
+var anyOf string
+
+//go:embed testdata/const.json
+var const_ string
+
+//go:embed testdata/enum.json
+var enum string
+
+//go:embed testdata/x-kubernetes-preserve-unknown-fields.json
+var xKubernetesPreserveUnknownFields string
+
+//go:embed testdata/types.json
+var types string
+
+//go:embed testdata/refs.json
+var refs string
+
+//go:embed testdata/refs2.json
+var refs2 string
+
+//go:embed testdata/refs3.json
+var refs3 string
+
+//go:embed testdata/allOf.json
+var allOf string
+
+//go:embed testdata/anyOf-and-allOf.json
+var anyOfAndAllOf string
+
+func TestSchemaDocs(t *testing.T) {
+	tests := map[string]struct {
+		schema string
+		docs   []SchemaProperty
+	}{
+		"simple": {
+			schema: `{"type": "object", "properties": {"name": {"type": "string", "description": "The name of the person"}}}`,
+			docs: []SchemaProperty{
+				{
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".name",
+					Description: "The name of the person",
+					Type:        "string",
+				},
+			},
+		},
+		"two-properties": {
+			schema: `{"type": "object", "properties": {
+					"name":    {"type": "string",  "description": "The name of the person"},
+					"riddler": {"type": "boolean", "description": "riddle-riddle-riddle-riddle-riddle-diddle-diddle"}
+				}}`,
+			docs: []SchemaProperty{
+				{
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".name",
+					Description: "The name of the person",
+					Type:        "string",
+				},
+				{
+					Path:        ".riddler",
+					Description: "riddle-riddle-riddle-riddle-riddle-diddle-diddle",
+					Type:        "boolean",
+				},
+			},
+		},
+		"array": {
+			schema: `{"type": "object", "properties": {
+					"tonyz": {"type": "array", "description": "Tony Zarets", "items": {
+						"type": "object",
+						"description": "An epic gamer",
+						"properties": {
+							"producerIsHuman": {"type": "boolean", "description": "It is true"}
+						}
+					}}
+				}}`,
+			docs: []SchemaProperty{
+				{
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".tonyz",
+					Description: "Tony Zarets",
+					Type:        "array",
+				},
+				{
+					Path:        ".tonyz[]",
+					Description: "An epic gamer",
+					Type:        "object",
+				},
+				{
+					Path:        ".tonyz[].producerIsHuman",
+					Description: "It is true",
+					Type:        "boolean",
+				},
+			},
+		},
+		"oneOf": {
+			schema: oneOf,
+			docs: []SchemaProperty{
+				{
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".port",
+					Description: "The port of the service",
+					Type:        "oneOf",
+				},
+				{
+					Path:        ".port?0",
+					Description: "The port name",
+					Type:        "string",
+				},
+				{
+					Path:        ".port?1",
+					Description: "The port number",
+					Type:        "integer",
+				},
+			},
+		},
+		"anyOf": {
+			schema: anyOf,
+			docs: []SchemaProperty{
+				{
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".port",
+					Description: "The port of the service",
+					Type:        "anyOf",
+				},
+				{
+					Path:        ".port?0",
+					Description: "The port name",
+					Type:        "string",
+				},
+				{
+					Path:        ".port?1",
+					Description: "The port number",
+					Type:        "integer",
+				},
+			},
+		},
+		"const": {
+			schema: const_,
+			docs: []SchemaProperty{
+				{
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".kind",
+					Description: "The service kind",
+					Type:        "const",
+				},
+			},
+		},
+		"enum": {
+			schema: enum,
+			docs: []SchemaProperty{
+				{
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".level",
+					Description: "The log level",
+					Type:        "enum",
+					Required:    true,
+				},
+			},
+		},
+		"x-kubernetes-preserve-unknown-fields": {
+			schema: xKubernetesPreserveUnknownFields,
+			docs: []SchemaProperty{
+				{
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".anything",
+					Description: "An object that can be anything",
+				},
+			},
+		},
+		"types": {
+			schema: types,
+			docs: []SchemaProperty{
+				{
+					Path: ".",
+					Type: "object",
+				},
+				{
+					Path:        ".port",
+					Description: "The port of the service",
+					Type:        "string, integer",
+				},
+			},
+		},
+		"refs": {
+			schema: refs,
+			docs: []SchemaProperty{
+				{
+					Path:        ".",
+					Type:        "object",
+					Description: "A person",
+				},
+				{
+					Path:        ".name",
+					Description: "The name of the person",
+					Type:        "string",
+				},
+			},
+		},
+		"refs2": {
+			schema: refs2,
+			docs: []SchemaProperty{
+				{
+					Path:        ".",
+					Type:        "object",
+					Description: "A person",
+				},
+				{
+					Path:        ".name",
+					Description: "The name of the person",
+					Type:        "string",
+				},
+			},
+		},
+		"refs3": {
+			schema: refs3,
+			docs: []SchemaProperty{
+				{
+					Path:        ".",
+					Type:        "object",
+					Description: "A person",
+				},
+				{
+					Path:        ".name",
+					Description: "The name of the person",
+					Type:        "string",
+				},
+			},
+		},
+		"allOf": {
+			schema: allOf,
+			docs: []SchemaProperty{
+				{
+					Path: ".",
+					Type: "allOf",
+				},
+				{
+					Path:        ".name",
+					Description: "the name of the object",
+					Type:        "string",
+				},
+				{
+					Path:        ".created_at",
+					Description: "when it was created",
+					Type:        "integer",
+				},
+			},
+		},
+		"anyOfAndAllOf": {
+			schema: anyOfAndAllOf,
+			docs: []SchemaProperty{
+				{
+					Path: ".",
+					Type: "anyOf",
+				},
+				{
+					Path: ".?0",
+					Type: "allOf",
+				},
+				{
+					Path:        ".?0.name",
+					Description: "the name",
+					Type:        "string",
+				},
+				{
+					Path:        ".?0.created_at",
+					Description: "when it was created",
+					Type:        "integer",
+				},
+			},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			var s Schema
+			if err := json.Unmarshal([]byte(test.schema), &s); err != nil {
+				t.Fatal(err)
+			}
+			docs, err := docs([]byte(test.schema))
+			if err != nil {
+				t.Fatalf("got unexpected error when creating docs: %s", err)
+			}
+			if len(docs) != len(test.docs) {
+				t.Fatalf("Expected %d properties with documentation, got %+v", len(test.docs), docs)
+			}
+			for i, d := range docs {
+				expected := test.docs[i]
+				if d.Path != expected.Path {
+					t.Fatalf("Expected path `%s`, got `%s`", expected.Path, d.Path)
+				}
+				if d.Description != expected.Description {
+					t.Fatalf("Expected description `%s`, got `%s`", expected.Description, d.Description)
+				}
+				if d.Type != expected.Type {
+					t.Fatalf("Expected type `%s`, got `%s`", expected.Type, d.Type)
+				}
+				if d.Required != expected.Required {
+					t.Fatalf("Expected required to be `%t`, got `%t`", expected.Required, d.Required)
+				}
+			}
+		})
+	}
+}
+
+func TestDocumentPaths(t *testing.T) {
+	tests := map[string]struct {
+		document string
+		paths    Paths
+	}{
+		"array": {
+			document: `spec:
+  ports:
+    - port: 443
+      name: https
+    - port: 80
+      name: http
+`,
+			paths: Paths{
+				".":                  newRange(0, 0, 0, 0),
+				".spec":              newRange(0, 0, 0, 4),
+				".spec.ports":        newRange(1, 2, 1, 7),
+				".spec.ports.0":      newRange(2, 4, 2, 5),
+				".spec.ports.0.port": newRange(2, 6, 2, 10),
+				".spec.ports.0.name": newRange(3, 6, 3, 10),
+				".spec.ports.1":      newRange(4, 4, 4, 5),
+				".spec.ports.1.port": newRange(4, 6, 4, 10),
+				".spec.ports.1.name": newRange(5, 6, 5, 10),
+			},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			paths := yamlDocumentPaths([]byte(test.document))
+			if len(paths) != len(test.paths) {
+				t.Fatalf("expected %d paths, got %v", len(test.paths), paths)
+			}
+			for path, pos := range test.paths {
+				actual, found := paths[path]
+				if !found {
+					t.Fatalf("expected path `%s` to exist, got %v", path, paths)
+				}
+				if actual != pos {
+					t.Fatalf("Expected position for %s to be %v, got %v", path, pos, actual)
 				}
 			}
 		})
