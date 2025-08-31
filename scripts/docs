@@ -1,0 +1,3 @@
+#!/bin/bash
+
+go run . schemas | fzf | xargs go run . docs >docs.html && open docs.html
