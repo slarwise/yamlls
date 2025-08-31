@@ -90,7 +90,10 @@ func run() error {
 			if err != nil {
 				return fmt.Errorf("read `%s`: %s", file, err)
 			}
-			errors := validateFile(string(bytes))
+			errors, valFailure := validateFile(string(bytes))
+			if valFailure != VALIDATION_FAILURE_REASON_NOT_A_FAILURE {
+				return fmt.Errorf("validate file %s: %s", file, valFailure)
+			}
 			for _, e := range errors {
 				fmt.Printf("%s:%d:%s\n", file, e.Range.Start.Line, e.Message)
 			}
@@ -463,55 +466,80 @@ func htmlDocs(docs []SchemaProperty, highlightProperty string) string {
 	return output.String()
 }
 
-func validateFile(contents string) []ValidationError {
+type Severity int
+
+const (
+	SEVERITY_ERROR Severity = iota
+	SEVERITY_WARN
+)
+
+type ValidationError struct {
+	Range   Range
+	Message string
+	Type    string
+	Severity
+}
+
+type ValidationFailureReason string
+
+const (
+	VALIDATION_FAILURE_REASON_NOT_A_FAILURE  ValidationFailureReason = "not a failure"
+	VALIDATION_FAILURE_REASON_SCHEMA_INVALID                         = "schema invalid"
+	VALIDATION_FAILURE_REASON_READ_SCHEMA                            = "failed to read schema"
+)
+
+func validateFile(contents string) ([]ValidationError, ValidationFailureReason) {
 	lines := strings.FieldsFunc(contents, func(r rune) bool { return r == '\n' })
 	positions := getDocumentPositions(contents)
-	var errors []ValidationError
+	var validationErrors []ValidationError
 	for _, docPos := range positions {
 		documentString := strings.Join(lines[docPos.Start:docPos.End], "\n")
 
 		gvk, ok := extractGvkFromDocument([]byte(documentString))
 		if !ok {
-			errors = append(errors, ValidationError{
-				Range: Range{
-					Start: Position{
-						Line: docPos.Start,
-						Char: 0,
-					},
-					End: Position{
-						Line: docPos.End,
-						Char: 0,
-					},
-				},
-				Message: "invalid yaml",
-				Type:    "invalid_yaml",
+			validationErrors = append(validationErrors, ValidationError{
+				Range:    newRange(docPos.Start, 0, docPos.End, 0),
+				Message:  "invalid yaml",
+				Type:     "invalid_yaml",
+				Severity: SEVERITY_ERROR,
 			})
 			continue
 		}
 
 		if gvk.kind == "" || gvk.version == "" {
-			fmt.Fprintf(os.Stderr, "no kind and group found for document %s\n", documentString)
 			continue
 		}
 
 		schemaId := gvkToSchemaId(gvk.group, gvk.version, gvk.kind)
-		schemaBytes, err := os.ReadFile(filepath.Join(DB_DIR, schemaId+".json"))
+		schemaFilepath := filepath.Join(DB_DIR, schemaId+".json")
+		schemaBytes, err := os.ReadFile(schemaFilepath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "load schema `%s: %s\n`", schemaId, err)
+			if errors.Is(err, os.ErrNotExist) {
+				apiVersion := fmt.Sprintf("%s/%s", gvk.group, gvk.version)
+				if gvk.group == "" {
+					apiVersion = gvk.version
+				}
+				validationErrors = append(validationErrors, ValidationError{
+					Range:    newRange(docPos.Start, 0, docPos.Start, 0),
+					Message:  fmt.Sprintf("no schema found for %s %s", gvk.kind, apiVersion),
+					Type:     "",
+					Severity: SEVERITY_WARN,
+				})
+			} else {
+				return nil, VALIDATION_FAILURE_REASON_READ_SCHEMA
+			}
 		}
 		schemaLoader := gojsonschema.NewBytesLoader(schemaBytes)
 
 		jsonDocument, err := yaml.YAMLToJSON([]byte(documentString))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "convert yaml to json: %s\n", err)
-			continue
+			panic(fmt.Sprintf("this yaml document was valid a few lines above: %s", documentString))
 		}
 		documentLoader := gojsonschema.NewBytesLoader(jsonDocument)
 
 		res, err := gojsonschema.Validate(schemaLoader, documentLoader)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "schema and/or document is invalid: %s\n", err)
-			continue
+			return nil, VALIDATION_FAILURE_REASON_SCHEMA_INVALID
 		}
 
 		paths := yamlDocumentPaths([]byte(documentString))
@@ -533,20 +561,14 @@ func validateFile(contents string) []ValidationError {
 				// expected path `.(root)` to exist in the document. Available paths: map[.apiVersion:{{1 0} {1 10}} .kind:{{0 0} {0 4}} .metadata:{{2 0} {2 8}} .metadata.name:{{3 2} {3 6}}]. Error type: required\n
 				panic(fmt.Sprintf("expected path `%s` to exist in the document. Available paths: %v. Error type: %s", field, paths, e.Type()))
 			}
-			errors = append(errors, ValidationError{
+			validationErrors = append(validationErrors, ValidationError{
 				Range:   newRange(docPos.Start+range_.Start.Line, range_.Start.Char, docPos.Start+range_.End.Line, range_.End.Char),
 				Message: e.Description(),
 				Type:    e.Type(), // I've got life!
 			})
 		}
 	}
-	return errors
-}
-
-type ValidationError struct {
-	Range   Range
-	Message string
-	Type    string
+	return validationErrors, VALIDATION_FAILURE_REASON_NOT_A_FAILURE
 }
 
 type Range struct{ Start, End Position } // zero-based, the start character is inclusive and the end character is exclusive
@@ -702,9 +724,22 @@ func runLanguageServer() error {
 	go func() {
 		for doc := range documentUpdates {
 			filenameToContents[doc.URI.Filename()] = doc.Text
-			errors := validateFile(doc.Text)
+			errors, err := validateFile(doc.Text)
+			if err != VALIDATION_FAILURE_REASON_NOT_A_FAILURE {
+				logger.Error("validate file", "err", fmt.Sprintf("%#v", err))
+			}
 			diagnostics := []protocol.Diagnostic{}
 			for _, e := range errors {
+				var severity protocol.DiagnosticSeverity
+				switch e.Severity {
+				case SEVERITY_ERROR:
+					severity = protocol.DiagnosticSeverityError
+				case SEVERITY_WARN:
+					severity = protocol.DiagnosticSeverityWarning
+				default:
+					// Should not happen
+					severity = protocol.DiagnosticSeverityInformation
+				}
 				diagnostics = append(diagnostics, protocol.Diagnostic{
 					Range: protocol.Range{
 						Start: protocol.Position{
@@ -716,7 +751,7 @@ func runLanguageServer() error {
 							Character: uint32(e.Range.End.Char),
 						},
 					},
-					Severity: protocol.DiagnosticSeverityError,
+					Severity: severity,
 					Source:   "yamlls",
 					Message:  e.Message,
 				})
