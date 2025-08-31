@@ -14,7 +14,7 @@ require (
 
 require (
 	github.com/segmentio/asm v1.2.0 // indirect
-	github.com/segmentio/encoding v0.4.1 // indirect
+	github.com/segmentio/encoding v0.5.3 // indirect
 	github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb // indirect
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
 	go.lsp.dev/jsonrpc2 v0.10.0 // indirect
@@ -25,7 +25,7 @@ require (
 
 require (
 	github.com/tidwall/match v1.1.1 // indirect
-	github.com/tidwall/pretty v1.2.0 // indirect
-	golang.org/x/sys v0.33.0 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/xerrors v0.0.0-20240903120638-7835f813f4da // indirect
 )
