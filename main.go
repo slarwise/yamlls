@@ -80,7 +80,7 @@ func run() error {
 				return fmt.Errorf("must provide the id of the schema to fill")
 			}
 			id := args[0]
-			panic(fmt.Sprintf("TODO: Fill the schema with id `%s`", id))
+			panicf("TODO: Fill the schema with id `%s`", id)
 		case "validate":
 			if len(args) == 0 {
 				return fmt.Errorf("must provide the filename to validate")
@@ -534,7 +534,7 @@ func validateFile(contents string) ([]ValidationError, ValidationFailureReason) 
 
 		jsonDocument, err := yaml.YAMLToJSON([]byte(documentString))
 		if err != nil {
-			panic(fmt.Sprintf("this yaml document was valid a few lines above: %s", documentString))
+			panicf("this yaml document was valid a few lines above: %s", documentString)
 		}
 		documentLoader := gojsonschema.NewBytesLoader(jsonDocument)
 
@@ -559,7 +559,7 @@ func validateFile(contents string) ([]ValidationError, ValidationFailureReason) 
 			}
 			range_, found := paths[field]
 			if !found {
-				panic(fmt.Sprintf("expected path `%s` to exist in the document. Available paths: %v. Error type: %s", field, paths, e.Type()))
+				panicf("expected path `%s` to exist in the document. Available paths: %v. Error type: %s", field, paths, e.Type())
 			}
 			validationErrors = append(validationErrors, ValidationError{
 				Range:   newRange(docPos.Start+range_.Start.Line, range_.Start.Char, docPos.Start+range_.End.Line, range_.End.Char),
@@ -607,10 +607,10 @@ func getDocumentPositions(file string) []lineRange {
 func yamlDocumentPaths(doc []byte) Paths {
 	astFile, err := yamlparser.ParseBytes([]byte(doc), 0)
 	if err != nil {
-		panic(fmt.Sprintf("expected a valid yaml document: %v", err))
+		panicf("expected a valid yaml document: %v", err)
 	}
 	if len(astFile.Docs) != 1 {
-		panic(fmt.Sprintf("expected 1 document, got %d", len(astFile.Docs)))
+		panicf("expected 1 document, got %d", len(astFile.Docs))
 	}
 	paths := Paths{}
 	ast.Walk(&paths, astFile.Docs[0])
