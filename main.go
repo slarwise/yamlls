@@ -516,13 +516,17 @@ func validateFile(contents string) []ValidationError {
 
 		paths := yamlDocumentPaths([]byte(documentString))
 		for _, e := range res.Errors() {
-			field := e.Field() // The root here is (root)
-			if e.Type() == "additional_property_not_allowed" {
-				field = field + "." + e.Details()["property"].(string)
-			}
-			field = "." + field
-			if field == ".(root)" {
+			var field string
+			if e.Field() == "(root)" {
 				field = "."
+			} else {
+				field = "." + e.Field()
+			}
+			if e.Type() == "additional_property_not_allowed" {
+				if field != "." {
+					field += "."
+				}
+				field += e.Details()["property"].(string)
 			}
 			range_, found := paths[field]
 			if !found {
