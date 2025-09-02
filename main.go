@@ -112,7 +112,7 @@ func run() error {
 				return fmt.Errorf("validate file %s: %s", file, valFailure)
 			}
 			for _, e := range errors {
-				fmt.Printf("%s:%d:%s\n", file, e.Range.Start.Line, e.Message)
+				fmt.Printf("%s:%d:%s\n", file, e.Range.Start.Line+1, e.Message)
 			}
 		case "refresh":
 			if err := refreshDatabase(); err != nil {
