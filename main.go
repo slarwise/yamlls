@@ -88,10 +88,9 @@ func run() error {
 				basename = args[0]
 				path = args[1]
 			}
-			filename := filepath.Join(DB_DIR, basename)
-			schema, err := os.ReadFile(filename)
+			schema, err := readSchema(basename)
 			if err != nil {
-				return fmt.Errorf("read schema %s: %s", filename, err)
+				return fmt.Errorf("fill schema: read schema %s: %s", basename, err)
 			}
 			yamlDoc, err := fill(schema, path)
 			if err != nil {
@@ -301,17 +300,37 @@ func schemaIds() ([]string, error) {
 }
 
 func showDocs(basename string) error {
-	filename := filepath.Join(DB_DIR, basename)
-	schema, err := os.ReadFile(filename)
+	schema, err := readSchema(basename)
 	if err != nil {
-		return fmt.Errorf("read schema %s: %s", filename, err)
+		return fmt.Errorf("read schema %s: %s", basename, err)
 	}
 	docs, err := docs(schema)
 	if err != nil {
-		return fmt.Errorf("create docs for %s: %s", filename, err)
+		return fmt.Errorf("create docs for %s: %s", basename, err)
 	}
 	fmt.Print(htmlDocs(docs, ""))
 	return nil
+}
+
+var schemaCache = map[string][]byte{}
+
+var ErrSchemaNotExist = errors.New("no schema found")
+
+func readSchema(basename string) ([]byte, error) {
+	if schema, found := schemaCache[basename]; found {
+		return schema, nil
+	}
+	filepath := filepath.Join(DB_DIR, basename)
+	bytes, err := os.ReadFile(filepath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrSchemaNotExist
+		} else {
+			return nil, fmt.Errorf("read %s: %s", filepath, err)
+		}
+	}
+	schemaCache[basename] = bytes
+	return bytes, nil
 }
 
 type GVK struct{ group, version, kind string }
@@ -554,10 +573,9 @@ func validateFile(contents string) ([]ValidationError, ValidationFailureReason) 
 		}
 
 		schemaId := gvkToSchemaId(gvk.group, gvk.version, gvk.kind)
-		schemaFilepath := filepath.Join(DB_DIR, schemaId+".json")
-		schemaBytes, err := os.ReadFile(schemaFilepath)
+		schemaBytes, err := readSchema(schemaId + ".json")
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
+			if errors.Is(err, ErrSchemaNotExist) {
 				apiVersion := fmt.Sprintf("%s/%s", gvk.group, gvk.version)
 				if gvk.group == "" {
 					apiVersion = gvk.version
@@ -913,7 +931,7 @@ func lspTextDocumentHover(rawParams json.RawMessage) (any, error) {
 		return nil, errors.New("no kind and apiVersion found")
 	}
 	schemaId := gvkToSchemaId(gvk.group, gvk.version, gvk.kind)
-	schema, err := os.ReadFile(filepath.Join(DB_DIR, schemaId+".json"))
+	schema, err := readSchema(schemaId + ".json")
 	if err != nil {
 		return nil, fmt.Errorf("no schema found for %s", schemaId)
 	}
@@ -983,7 +1001,7 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 		return codeActions, errors.New("no kind and apiVersion found")
 	}
 	schemaId := gvkToSchemaId(gvk.group, gvk.version, gvk.kind)
-	schema, err := os.ReadFile(filepath.Join(DB_DIR, schemaId+".json"))
+	schema, err := readSchema(schemaId + ".json")
 	if err != nil {
 		return codeActions, fmt.Errorf("no schema found for %s", schemaId)
 	}
