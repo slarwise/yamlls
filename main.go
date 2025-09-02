@@ -1427,8 +1427,15 @@ func fill(rootSchemaBytes []byte, path string) (string, error) {
 		}
 		result = concreteResult
 	case schema.Items != nil:
-		// TODO: Populate the first element if it's an object
-		result = []any{zeroValue(*schema.Items)}
+		if len(schema.Items.Properties) > 0 {
+			concreteResult := map[string]any{}
+			for prop, subSchema := range schema.Items.Properties {
+				concreteResult[prop] = zeroValue(subSchema)
+			}
+			result = []any{concreteResult}
+		} else {
+			result = []any{zeroValue(*schema.Items)}
+		}
 	default:
 		result = zeroValue(schema)
 	}
@@ -1464,6 +1471,10 @@ func zeroValue(s Schema) any {
 		return s.Enum[0]
 	case s.Const != "":
 		return s.Const
+	case len(s.AnyOf) > 0:
+		return zeroValue(s.AnyOf[0])
+	case len(s.OneOf) > 0:
+		return zeroValue(s.OneOf[0])
 	default:
 		panic(fmt.Sprintf("zero value for schema not implemented. schema:\n`%#v`", s))
 	}
