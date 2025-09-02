@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -211,15 +212,20 @@ func refreshDatabase() error {
 	}
 
 	worker := func(jobs <-chan Definition, results chan<- error) {
+		var schemaCompact bytes.Buffer
 		for definition := range jobs {
 			schema, err := httpGet(definition.url)
 			if err != nil {
 				results <- fmt.Errorf("get schema: %s", err)
 			}
+			if err := json.Compact(&schemaCompact, schema); err != nil {
+				results <- fmt.Errorf("make schema more compact: %s", err)
+			}
 			filename := filepath.Join(DB_DIR, definition.basename)
-			if err := os.WriteFile(filename, schema, 0644); err != nil {
+			if err := os.WriteFile(filename, schemaCompact.Bytes(), 0644); err != nil {
 				results <- fmt.Errorf("write schema to %s: %s", filename, err)
 			}
+			schemaCompact.Reset()
 			results <- nil
 		}
 	}
