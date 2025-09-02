@@ -991,14 +991,7 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 		if err != nil {
 			logger.Error("fill schema", "err", err)
 		} else {
-			// kind: Service
-			// apiVersion: v1
-			// spec:
-			//   ports: # cursor is on ports
-			// other_property:
-			// ---
-			// We want to replace everything within ports
-
+			// TODO: `{}`, `""`, 0 should be one the same row as the property we are filling, not the next line
 			indentLevel := pathRangeAtCursor.Start.Char
 			endLine := params.Range.Start.Line + 1
 			higherLevelPattern := regexp.MustCompile(fmt.Sprintf(`^%s\s*[^ ]`, strings.Repeat(" ", indentLevel+1)))
@@ -1404,9 +1397,10 @@ func fill(rootSchemaBytes []byte, path string) (string, error) {
 	schemaAtPath := rootSchemaBytes
 	if path != "." {
 		schemaPath := strings.ReplaceAll(path, ".", ".properties.")
+		schemaPath = strings.ReplaceAll(schemaPath, "[].", ".items.")
 		schemaAtPathResult := gjson.GetBytes(rootSchemaBytes, tidwallPath(schemaPath))
 		if !schemaAtPathResult.Exists() {
-			return "", fmt.Errorf("no schema found at path `%s`", path)
+			return "", fmt.Errorf("no schema found at path `%s`", schemaPath)
 		}
 		schemaAtPath = []byte(schemaAtPathResult.Raw)
 	}
