@@ -7,6 +7,7 @@ toolchain go1.24.3
 require (
 	github.com/goccy/go-yaml v1.18.0
 	github.com/tidwall/gjson v1.18.0
+	github.com/tidwall/sjson v1.2.5
 	github.com/xeipuuv/gojsonschema v1.2.0
 	go.lsp.dev/protocol v0.12.0
 	go.lsp.dev/uri v0.3.0

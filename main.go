@@ -76,11 +76,27 @@ func run() error {
 				return fmt.Errorf("get docs: %s", err)
 			}
 		case "fill":
-			if len(args) == 0 {
-				return fmt.Errorf("must provide the id of the schema to fill")
+			var basename string
+			path := "."
+			switch len(args) {
+			case 0:
+				return fmt.Errorf("must provide `basename`, e.g. `yamlls fill Deployment-apps-v1.json`. Get the basename from `yamlls schemas`.")
+			case 1:
+				basename = args[0]
+			case 2:
+				basename = args[0]
+				path = args[1]
 			}
-			id := args[0]
-			panicf("TODO: Fill the schema with id `%s`", id)
+			filename := filepath.Join(DB_DIR, basename)
+			schema, err := os.ReadFile(filename)
+			if err != nil {
+				return fmt.Errorf("read schema %s: %s", filename, err)
+			}
+			yamlDoc, err := fill(schema, path)
+			if err != nil {
+				return fmt.Errorf("fill schema: %s", err)
+			}
+			fmt.Print(yamlDoc)
 		case "validate":
 			if len(args) == 0 {
 				return fmt.Errorf("must provide the filename to validate")
@@ -794,7 +810,7 @@ func lspInitialize(params json.RawMessage) (any, error) {
 			HoverProvider:      true,
 			CodeActionProvider: true,
 			ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
-				Commands: []string{"open-docs"},
+				Commands: []string{"open-docs", "fill"},
 			},
 		},
 		ServerInfo: &protocol.ServerInfo{Name: "yamlls"},
@@ -860,7 +876,7 @@ func lspTextDocumentHover(rawParams json.RawMessage) (any, error) {
 		return nil, nil
 	}
 	paths := yamlDocumentPaths([]byte(currentDocument))
-	pathAtCursor, found := pathAtCursor(paths, lineInDocument, int(params.Position.Character))
+	pathAtCursor, _, found := pathAtCursor(paths, lineInDocument, int(params.Position.Character))
 	if !found {
 		return nil, nil
 	}
@@ -907,9 +923,10 @@ var arrayPath = regexp.MustCompile(`\.\d+`)
 
 func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 	logger.Info(fmt.Sprintf("Received %s request", protocol.MethodTextDocumentCodeAction))
+	codeActions := []protocol.CodeAction{}
 	var params protocol.CodeActionParams
 	if err := json.Unmarshal(rawParams, &params); err != nil {
-		return nil, err
+		return codeActions, err
 	}
 	contents := filenameToContents[params.TextDocument.URI.Filename()]
 
@@ -924,10 +941,10 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 		}
 	}
 	if currentDocument == "" {
-		return nil, nil
+		return codeActions, nil
 	}
 	paths := yamlDocumentPaths([]byte(currentDocument))
-	pathAtCursor, found := pathAtCursor(paths, lineInDocument, int(params.Range.Start.Character))
+	pathAtCursor, pathRangeAtCursor, found := pathAtCursor(paths, lineInDocument, int(params.Range.Start.Character))
 	if found {
 		// Turn spec.ports.0.name into spec.ports[].name
 		// TODO: pathAtCursor should return a good path
@@ -936,37 +953,94 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 
 	gvk, ok := extractGvkFromDocument([]byte(currentDocument))
 	if !ok {
-		return nil, errors.New("no kind and apiVersion found")
+		return codeActions, errors.New("no kind and apiVersion found")
 	}
 	schemaId := gvkToSchemaId(gvk.group, gvk.version, gvk.kind)
 	schema, err := os.ReadFile(filepath.Join(DB_DIR, schemaId+".json"))
 	if err != nil {
-		return nil, fmt.Errorf("no schema found for %s", schemaId)
+		return codeActions, fmt.Errorf("no schema found for %s", schemaId)
 	}
 
-	docs, err := docs(schema)
-	if err != nil {
-		return nil, fmt.Errorf("create docs: %s", err)
-	}
-	html := htmlDocs(docs, pathAtCursor)
+	{
+		// open-docs
+		docs, err := docs(schema)
+		if err != nil {
+			return nil, fmt.Errorf("create docs: %s", err)
+		}
+		html := htmlDocs(docs, pathAtCursor)
 
-	filename := filepath.Join(CACHE_DIR, "docs.html")
-	if err := os.WriteFile(filename, []byte(html), 0755); err != nil {
-		slog.Error("write html documentation to file", "err", err, "file", filename)
-		return "", errors.New("failed to write docs to file")
-	}
-	htmlDocsUri := "file://" + filename
-	response := []protocol.CodeAction{
-		{
+		filename := filepath.Join(CACHE_DIR, "docs.html")
+		if err := os.WriteFile(filename, []byte(html), 0755); err != nil {
+			slog.Error("write html documentation to file", "err", err, "file", filename)
+			return "", errors.New("failed to write docs to file")
+		}
+		htmlDocsUri := "file://" + filename
+		codeActions = append(codeActions, protocol.CodeAction{
 			Title: "Open documentation",
 			Command: &protocol.Command{
 				Title:     "Open documentation",
 				Command:   "open-docs",
 				Arguments: []any{htmlDocsUri},
 			},
-		},
+		})
 	}
-	return response, nil
+
+	{
+		// fill
+		newText, err := fill(schema, pathAtCursor)
+		if err != nil {
+			logger.Error("fill schema", "err", err)
+		} else {
+			// kind: Service
+			// apiVersion: v1
+			// spec:
+			//   ports: # cursor is on ports
+			// other_property:
+			// ---
+			// We want to replace everything within ports
+
+			indentLevel := pathRangeAtCursor.Start.Char
+			endLine := params.Range.Start.Line + 1
+			higherLevelPattern := regexp.MustCompile(fmt.Sprintf(`^%s\s*[^ ]`, strings.Repeat(" ", indentLevel+1)))
+			for _, line := range strings.Split(currentDocument, "\n")[lineInDocument+1:] {
+				if !higherLevelPattern.MatchString(line) || line == "---" {
+					break
+				}
+				endLine += 1
+			}
+			var lines []string
+			for _, line := range strings.Split(newText, "\n") {
+				if line == "" {
+					continue
+				}
+				lines = append(lines, strings.Repeat(" ", indentLevel+2)+line)
+			}
+			newText = "\n" + strings.Join(lines, "\n") + "\n"
+			codeActions = append(codeActions, protocol.CodeAction{
+				Title: "Fill " + pathAtCursor,
+				Edit: &protocol.WorkspaceEdit{
+					Changes: map[protocol.DocumentURI][]protocol.TextEdit{
+						params.TextDocument.URI: {
+							{
+								Range: protocol.Range{
+									Start: protocol.Position{
+										Line:      params.Range.Start.Line,
+										Character: uint32(pathRangeAtCursor.End.Char) + 1,
+									},
+									End: protocol.Position{
+										Line:      endLine,
+										Character: 0,
+									},
+								},
+								NewText: newText,
+							},
+						},
+					},
+				},
+			})
+		}
+	}
+	return codeActions, nil
 }
 
 func lspMethodWorkspaceExecuteCommand(rawParams json.RawMessage) (any, error) {
@@ -979,7 +1053,7 @@ func lspMethodWorkspaceExecuteCommand(rawParams json.RawMessage) (any, error) {
 	switch params.Command {
 	case "open-docs":
 		if len(params.Arguments) != 1 {
-			return "", fmt.Errorf("Must provide 1 argument to open-docs, the uri")
+			return "", fmt.Errorf("Must provide 1 argument to open-docs: the uri")
 		}
 		viewerURL := params.Arguments[0].(string)
 		uri := uri.URI(viewerURL)
@@ -988,7 +1062,7 @@ func lspMethodWorkspaceExecuteCommand(rawParams json.RawMessage) (any, error) {
 			External:  true,
 			TakeFocus: true,
 		}
-		m.Request("window/showDocument", showDocumentParams)
+		m.Request(protocol.MethodShowDocument, showDocumentParams)
 	default:
 		return "", fmt.Errorf("Command not found %s", params.Command)
 	}
@@ -1022,13 +1096,13 @@ func extractGvkFromDocument(docBytes []byte) (GVK, bool) {
 	return gvk, true
 }
 
-func pathAtCursor(paths Paths, line, char int) (string, bool) {
+func pathAtCursor(paths Paths, line, char int) (string, Range, bool) {
 	for path, r := range paths {
 		if r.Start.Line == line && r.Start.Char <= char && char < r.End.Char {
-			return path, true
+			return path, r, true
 		}
 	}
-	return "", false
+	return "", Range{}, false
 }
 
 const protocolVersion = "2.0"
@@ -1323,5 +1397,106 @@ func (m *Mux) handleRequestResponse(req Request) {
 	if err = m.write(res); err != nil {
 		log.Error("Failed to respond", slog.Any("error", err))
 		m.error(fmt.Errorf("Failed to response: %w", err))
+	}
+}
+
+func fill(rootSchemaBytes []byte, path string) (string, error) {
+	schemaAtPath := rootSchemaBytes
+	if path != "." {
+		schemaPath := strings.ReplaceAll(path, ".", ".properties.")
+		schemaAtPathResult := gjson.GetBytes(rootSchemaBytes, tidwallPath(schemaPath))
+		if !schemaAtPathResult.Exists() {
+			return "", fmt.Errorf("no schema found at path `%s`", path)
+		}
+		schemaAtPath = []byte(schemaAtPathResult.Raw)
+	}
+
+	var schema Schema
+	if err := json.Unmarshal(schemaAtPath, &schema); err != nil {
+		return "", fmt.Errorf("unmarshal schema: %s", err)
+	}
+
+	var err error
+	var result any
+
+	switch {
+	case len(schema.Properties) > 0:
+		concreteResult := map[string]any{}
+		for prop, subSchema := range schema.Properties {
+			concreteResult[prop] = zeroValue(subSchema)
+		}
+		result = concreteResult
+	case schema.Items != nil:
+		if len(schema.Items.Properties) > 0 {
+			concreteResult := map[string]any{}
+			for prop, subSchema := range schema.Items.Properties {
+				concreteResult[prop] = zeroValue(subSchema)
+			}
+			result = []any{concreteResult}
+		} else {
+			result = []any{zeroValue(*schema.Items)}
+		}
+	default:
+		result = zeroValue(schema)
+	}
+
+	yamlBytes, err := yaml.Marshal(result)
+	if err != nil {
+		return "", fmt.Errorf("marshal filled schema to yaml: %s", err)
+	}
+	return string(yamlBytes), nil
+}
+
+func tidwallPath(path string) string {
+	if path == "." {
+		panic("don't know what the root path is in tidwall libs")
+	}
+	return strings.TrimPrefix(path, ".")
+}
+
+func zeroValue(s Schema) any {
+	switch {
+	case s.Properties != nil:
+		return map[string]any{}
+	case s.Type.One != "":
+		return zeroValueForType(s.Type.One)
+	case len(s.Type.Many) > 0:
+		for _, t := range s.Type.Many {
+			if t != gojsonschema.TYPE_NULL {
+				return zeroValueForType(t)
+			}
+		}
+		return nil
+	case len(s.Enum) > 0:
+		return s.Enum[0]
+	case s.Const != "":
+		return s.Const
+	case len(s.AnyOf) > 0:
+		return zeroValue(s.AnyOf[0])
+	case len(s.OneOf) > 0:
+		return zeroValue(s.OneOf[0])
+	default:
+		panic(fmt.Sprintf("zero value for schema not implemented. schema:\n`%#v`", s))
+	}
+}
+
+func zeroValueForType(t string) any {
+	switch t {
+	case gojsonschema.TYPE_BOOLEAN:
+		return false
+	case gojsonschema.TYPE_INTEGER:
+		return 0
+	case gojsonschema.TYPE_NUMBER:
+		return 0
+	case gojsonschema.TYPE_NULL:
+		return nil
+	case gojsonschema.TYPE_OBJECT:
+		return map[string]any{}
+	case gojsonschema.TYPE_STRING:
+		return ""
+	case gojsonschema.TYPE_ARRAY:
+		return []any{}
+	default:
+		panic(fmt.Sprintf("zero value for type `%s` not implemented", t))
 	}
 }
