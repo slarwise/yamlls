@@ -596,3 +596,27 @@ func TestDocumentPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestFillDocument(t *testing.T) {
+	tests := map[string]struct {
+		schema, path, expected string
+	}{
+		"enum": {
+			schema: enum,
+			path:   ".",
+			expected: `level: info
+`,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			filled, err := fill([]byte(test.schema), test.path)
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			if filled != test.expected {
+				t.Fatalf("expected\n`%s`\ngot\n`%s`", test.expected, filled)
+			}
+		})
+	}
+}
