@@ -237,14 +237,11 @@ func refreshDatabase() error {
 	close(jobs)
 
 	for i := range len(definitionsToDownload) {
-		if i > 0 {
-			fmt.Fprintf(os.Stderr, "\r")
-		}
 		err := <-results
 		if err != nil {
 			fmt.Fprint(os.Stderr, err)
 		}
-		fmt.Fprintf(os.Stderr, "%d/%d", i+1, len(definitionsToDownload))
+		fmt.Fprintf(os.Stderr, "\r%4d/%d", i+1, len(definitionsToDownload))
 	}
 	fmt.Fprintln(os.Stderr)
 	return nil
