@@ -137,6 +137,9 @@ func refreshDatabase() error {
 		return fmt.Errorf("create `%s`: %s", DB_DIR, err)
 	}
 
+	type Definition struct{ url, basename string }
+
+	var definitionsToDownload []Definition
 	{
 		nativeDefinitionsUrl := fmt.Sprintf("%s/_definitions.json", NATIVE_SCHEMAS_BASE_URL)
 		body, err := httpGet(nativeDefinitionsUrl)
@@ -155,10 +158,7 @@ func refreshDatabase() error {
 		if err := json.Unmarshal(body, &definitions); err != nil {
 			return fmt.Errorf("unmarshal native definitions: %s", err)
 		}
-		i := 0
 		for id, definition := range definitions.Definitions {
-			i++
-			fmt.Fprintf(os.Stderr, "%-3d/%d\r", i, len(definitions.Definitions))
 			if strings.Contains(id, "apimachinery") || strings.Contains(id, "apiextensions") || strings.Contains(id, "apiserverinternal") || len(definition.GroupVersionKind) != 1 {
 				continue
 			}
@@ -170,14 +170,7 @@ func refreshDatabase() error {
 			//       But the group in the filename in the git repo is just `networking`
 			baseName := strings.Replace(schemaId, group, groupFirstPart, 1) + ".json"
 			schemaUrl := fmt.Sprintf("%s/%s", NATIVE_SCHEMAS_BASE_URL, strings.ToLower(baseName))
-			schema, err := httpGet(schemaUrl)
-			if err != nil {
-				return fmt.Errorf("get schema: %s", err)
-			}
-			filename := filepath.Join(DB_DIR, schemaId+".json")
-			if err := os.WriteFile(filename, schema, 0644); err != nil {
-				return fmt.Errorf("write schema to %s: %s", filename, err)
-			}
+			definitionsToDownload = append(definitionsToDownload, Definition{url: schemaUrl, basename: schemaId + ".json"})
 		}
 	}
 
@@ -195,34 +188,65 @@ func refreshDatabase() error {
 		if err := yaml.Unmarshal(body, &index); err != nil {
 			return fmt.Errorf("unmarshal custom definitions index: %s", err)
 		}
-		i := 0
 		for _, definitions := range index {
-			i++
-			fmt.Fprintf(os.Stderr, "%-3d/%d\r", i, len(index))
 			for _, d := range definitions {
 				if strings.Contains(d.Kind, "/") {
 					fmt.Fprintf(os.Stderr, "kind `%s` contains a `/`, it shouldn't\n", d.Kind)
 					continue
 				}
 				schemaUrl := fmt.Sprintf("%s/%s", CUSTOM_SCHEMAS_BASE_URL, d.Filename)
-				body, err := httpGet(schemaUrl)
-				if err != nil {
-					return fmt.Errorf("get schema: %s", err)
-				}
 				split := strings.Split(d.ApiVersion, "/")
 				if len(split) != 2 {
-					return fmt.Errorf("expected apiVersion to have exactly one `/`, got %s", d.ApiVersion)
+					fmt.Fprintf(os.Stderr, "expected apiVersion to have exactly one `/`, got %s", d.ApiVersion)
+					continue
 				}
 				group, version := split[0], split[1]
 				schemaId := gvkToSchemaId(group, version, d.Kind)
-				baseName := schemaId + ".json"
-				filename := filepath.Join(DB_DIR, baseName)
-				if err := os.WriteFile(filename, body, 0644); err != nil {
-					return fmt.Errorf("write schema to %s: %s", filename, err)
-				}
+				definitionsToDownload = append(definitionsToDownload, Definition{
+					url:      schemaUrl,
+					basename: schemaId + ".json",
+				})
 			}
 		}
 	}
+
+	worker := func(jobs <-chan Definition, results chan<- error) {
+		for definition := range jobs {
+			schema, err := httpGet(definition.url)
+			if err != nil {
+				results <- fmt.Errorf("get schema: %s", err)
+			}
+			filename := filepath.Join(DB_DIR, definition.basename)
+			if err := os.WriteFile(filename, schema, 0644); err != nil {
+				results <- fmt.Errorf("write schema to %s: %s", filename, err)
+			}
+			results <- nil
+		}
+	}
+	jobs := make(chan Definition, len(definitionsToDownload))
+	results := make(chan error, len(definitionsToDownload))
+
+	workersCount := 50
+	for range workersCount {
+		go worker(jobs, results)
+	}
+
+	for _, d := range definitionsToDownload {
+		jobs <- d
+	}
+	close(jobs)
+
+	for i := range len(definitionsToDownload) {
+		if i > 0 {
+			fmt.Fprintf(os.Stderr, "\r")
+		}
+		err := <-results
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+		}
+		fmt.Fprintf(os.Stderr, "%d/%d", i+1, len(definitionsToDownload))
+	}
+	fmt.Fprintln(os.Stderr)
 	return nil
 }
 
