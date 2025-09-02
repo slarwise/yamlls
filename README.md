@@ -5,6 +5,7 @@
 - No configuration needed to detect schemas
 - Hover: Show description of field
 - Code Action: Open documentation in browser
+- Code Action: Fill the field under the cursor with zero values
 - Diagnostics: Validate yaml syntax
 - Diagnostics: Validate against schema
 - UPDATE: Not anymore, need to add it back: Kustomization: Warn when not all yaml files in the current dir are included as resources
@@ -86,8 +87,6 @@ tail -f ~/Library/Caches/yamlls/log | jq # Follow the logs from yamlls (on a mac
     other
   - Suggest `enum`s from the schema
 - Code actions
-  - Fill all required fields. Use placeholders that fit the type, or the first
-    `enum`.
   - Add all files in the current directory to .resources in a Kustomization file
 - Background http server
   - Show external documentation in a nice way for the currently open file. Can
