@@ -92,7 +92,7 @@ func run() error {
 			if err != nil {
 				return fmt.Errorf("fill schema: read schema %s: %s", basename, err)
 			}
-			yamlDoc, err := fill(schema, path)
+			yamlDoc, err := schemaFill(schema, path)
 			if err != nil {
 				return fmt.Errorf("fill schema: %s", err)
 			}
@@ -106,7 +106,7 @@ func run() error {
 			if err != nil {
 				return fmt.Errorf("read `%s`: %s", file, err)
 			}
-			errors, valFailure := validateFile(string(bytes))
+			errors, valFailure := fileValidate(string(bytes))
 			if valFailure != VALIDATION_FAILURE_REASON_NOT_A_FAILURE {
 				return fmt.Errorf("validate file %s: %s", file, valFailure)
 			}
@@ -304,7 +304,7 @@ func showDocs(basename string) error {
 	if err != nil {
 		return fmt.Errorf("read schema %s: %s", basename, err)
 	}
-	docs, err := docs(schema)
+	docs, err := schemaDocs(schema)
 	if err != nil {
 		return fmt.Errorf("create docs for %s: %s", basename, err)
 	}
@@ -403,7 +403,7 @@ type SchemaProperty struct {
 	Required                bool
 }
 
-func docs(schema []byte) ([]SchemaProperty, error) {
+func schemaDocs(schema []byte) ([]SchemaProperty, error) {
 	var schemaParsed Schema
 	if err := json.Unmarshal(schema, &schemaParsed); err != nil {
 		return nil, fmt.Errorf("parse schema: %s", err)
@@ -550,14 +550,14 @@ const (
 	VALIDATION_FAILURE_REASON_READ_SCHEMA                            = "failed to read schema"
 )
 
-func validateFile(contents string) ([]ValidationError, ValidationFailureReason) {
-	lines := strings.FieldsFunc(contents, func(r rune) bool { return r == '\n' })
-	positions := getDocumentPositions(contents)
+func fileValidate(file string) ([]ValidationError, ValidationFailureReason) {
+	lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
+	positions := fileDocumentPositions(file)
 	var validationErrors []ValidationError
 	for _, docPos := range positions {
 		documentString := strings.Join(lines[docPos.Start:docPos.End], "\n")
 
-		gvk, ok := extractGvkFromDocument([]byte(documentString))
+		gvk, ok := documentGVK([]byte(documentString))
 		if !ok {
 			validationErrors = append(validationErrors, ValidationError{
 				Range:    newRange(docPos.Start, 0, docPos.End, 0),
@@ -604,7 +604,7 @@ func validateFile(contents string) ([]ValidationError, ValidationFailureReason) 
 			return nil, VALIDATION_FAILURE_REASON_SCHEMA_INVALID
 		}
 
-		paths := yamlDocumentPaths([]byte(documentString))
+		paths := documentPaths([]byte(documentString))
 		for _, e := range res.Errors() {
 			var field string
 			if e.Field() == "(root)" {
@@ -644,7 +644,7 @@ func newRange(startLine, startChar, endLine, endChar int) Range {
 
 type lineRange struct{ Start, End int } // [Start, End), 0-indexed
 
-func getDocumentPositions(file string) []lineRange {
+func fileDocumentPositions(file string) []lineRange {
 	var ranges []lineRange
 	startLine := 0
 	lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
@@ -665,7 +665,7 @@ func getDocumentPositions(file string) []lineRange {
 	return ranges
 }
 
-func yamlDocumentPaths(doc []byte) Paths {
+func documentPaths(doc []byte) Paths {
 	astFile, err := yamlparser.ParseBytes([]byte(doc), 0)
 	if err != nil {
 		panicf("expected a valid yaml document: %v", err)
@@ -785,7 +785,7 @@ func runLanguageServer() error {
 	go func() {
 		for doc := range documentUpdates {
 			filenameToContents[doc.URI.Filename()] = doc.Text
-			errors, err := validateFile(doc.Text)
+			errors, err := fileValidate(doc.Text)
 			if err != VALIDATION_FAILURE_REASON_NOT_A_FAILURE {
 				logger.Error("validate file", "err", fmt.Sprintf("%#v", err))
 			}
@@ -907,7 +907,7 @@ func lspTextDocumentHover(rawParams json.RawMessage) (any, error) {
 	}
 	contents := filenameToContents[params.TextDocument.URI.Filename()]
 
-	documentPositions := getDocumentPositions(contents)
+	documentPositions := fileDocumentPositions(contents)
 	var currentDocument string
 	var lineInDocument int
 	for _, r := range documentPositions {
@@ -920,13 +920,13 @@ func lspTextDocumentHover(rawParams json.RawMessage) (any, error) {
 	if currentDocument == "" {
 		return nil, nil
 	}
-	paths := yamlDocumentPaths([]byte(currentDocument))
+	paths := documentPaths([]byte(currentDocument))
 	pathAtCursor, _, found := pathAtCursor(paths, lineInDocument, int(params.Position.Character))
 	if !found {
 		return nil, nil
 	}
 
-	gvk, ok := extractGvkFromDocument([]byte(currentDocument))
+	gvk, ok := documentGVK([]byte(currentDocument))
 	if !ok {
 		return nil, errors.New("no kind and apiVersion found")
 	}
@@ -936,7 +936,7 @@ func lspTextDocumentHover(rawParams json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("no schema found for %s", schemaId)
 	}
 
-	docs, err := docs(schema)
+	docs, err := schemaDocs(schema)
 	if err != nil {
 		return nil, fmt.Errorf("create docs: %s", err)
 	}
@@ -975,7 +975,7 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 	}
 	contents := filenameToContents[params.TextDocument.URI.Filename()]
 
-	documentPositions := getDocumentPositions(contents)
+	documentPositions := fileDocumentPositions(contents)
 	var currentDocument string
 	var lineInDocument int
 	for _, r := range documentPositions {
@@ -988,7 +988,7 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 	if currentDocument == "" {
 		return codeActions, nil
 	}
-	paths := yamlDocumentPaths([]byte(currentDocument))
+	paths := documentPaths([]byte(currentDocument))
 	pathAtCursor, pathRangeAtCursor, found := pathAtCursor(paths, lineInDocument, int(params.Range.Start.Character))
 	if found {
 		// Turn spec.ports.0.name into spec.ports[].name
@@ -996,7 +996,7 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 		pathAtCursor = arrayPath.ReplaceAllString(pathAtCursor, "[]")
 	}
 
-	gvk, ok := extractGvkFromDocument([]byte(currentDocument))
+	gvk, ok := documentGVK([]byte(currentDocument))
 	if !ok {
 		return codeActions, errors.New("no kind and apiVersion found")
 	}
@@ -1008,7 +1008,7 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 
 	{
 		// open-docs
-		docs, err := docs(schema)
+		docs, err := schemaDocs(schema)
 		if err != nil {
 			return nil, fmt.Errorf("create docs: %s", err)
 		}
@@ -1032,7 +1032,7 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 
 	{
 		// fill
-		newText, err := fill(schema, pathAtCursor)
+		newText, err := schemaFill(schema, pathAtCursor)
 		if err != nil {
 			logger.Error("fill schema", "err", err)
 		} else {
@@ -1108,7 +1108,7 @@ func lspMethodWorkspaceExecuteCommand(rawParams json.RawMessage) (any, error) {
 }
 
 // Return false if yaml is invalid
-func extractGvkFromDocument(docBytes []byte) (GVK, bool) {
+func documentGVK(docBytes []byte) (GVK, bool) {
 	var document map[string]any
 	if err := yaml.Unmarshal(docBytes, &document); err != nil {
 		return GVK{}, false
@@ -1438,12 +1438,12 @@ func (m *Mux) handleRequestResponse(req Request) {
 	}
 }
 
-func fill(rootSchemaBytes []byte, path string) (string, error) {
+func schemaFill(rootSchemaBytes []byte, path string) (string, error) {
 	schemaAtPath := rootSchemaBytes
 	if path != "." {
 		schemaPath := strings.ReplaceAll(path, ".", ".properties.")
 		schemaPath = strings.ReplaceAll(schemaPath, "[].", ".items.")
-		schemaAtPathResult := gjson.GetBytes(rootSchemaBytes, tidwallPath(schemaPath))
+		schemaAtPathResult := gjson.GetBytes(rootSchemaBytes, pathToTidwallPath(schemaPath))
 		if !schemaAtPathResult.Exists() {
 			return "", fmt.Errorf("no schema found at path `%s`", schemaPath)
 		}
@@ -1462,21 +1462,21 @@ func fill(rootSchemaBytes []byte, path string) (string, error) {
 	case len(schema.Properties) > 0:
 		concreteResult := map[string]any{}
 		for prop, subSchema := range schema.Properties {
-			concreteResult[prop] = zeroValue(subSchema)
+			concreteResult[prop] = schemaZeroValue(subSchema)
 		}
 		result = concreteResult
 	case schema.Items != nil:
 		if len(schema.Items.Properties) > 0 {
 			concreteResult := map[string]any{}
 			for prop, subSchema := range schema.Items.Properties {
-				concreteResult[prop] = zeroValue(subSchema)
+				concreteResult[prop] = schemaZeroValue(subSchema)
 			}
 			result = []any{concreteResult}
 		} else {
-			result = []any{zeroValue(*schema.Items)}
+			result = []any{schemaZeroValue(*schema.Items)}
 		}
 	default:
-		result = zeroValue(schema)
+		result = schemaZeroValue(schema)
 	}
 
 	yamlBytes, err := yaml.Marshal(result)
@@ -1486,23 +1486,23 @@ func fill(rootSchemaBytes []byte, path string) (string, error) {
 	return string(yamlBytes), nil
 }
 
-func tidwallPath(path string) string {
+func pathToTidwallPath(path string) string {
 	if path == "." {
 		panic("don't know what the root path is in tidwall libs")
 	}
 	return strings.TrimPrefix(path, ".")
 }
 
-func zeroValue(s Schema) any {
+func schemaZeroValue(s Schema) any {
 	switch {
 	case s.Properties != nil:
 		return map[string]any{}
 	case s.Type.One != "":
-		return zeroValueForType(s.Type.One)
+		return typeZeroValue(s.Type.One)
 	case len(s.Type.Many) > 0:
 		for _, t := range s.Type.Many {
 			if t != gojsonschema.TYPE_NULL {
-				return zeroValueForType(t)
+				return typeZeroValue(t)
 			}
 		}
 		return nil
@@ -1511,15 +1511,15 @@ func zeroValue(s Schema) any {
 	case s.Const != "":
 		return s.Const
 	case len(s.AnyOf) > 0:
-		return zeroValue(s.AnyOf[0])
+		return schemaZeroValue(s.AnyOf[0])
 	case len(s.OneOf) > 0:
-		return zeroValue(s.OneOf[0])
+		return schemaZeroValue(s.OneOf[0])
 	default:
 		panic(fmt.Sprintf("zero value for schema not implemented. schema:\n`%#v`", s))
 	}
 }
 
-func zeroValueForType(t string) any {
+func typeZeroValue(t string) any {
 	switch t {
 	case gojsonschema.TYPE_BOOLEAN:
 		return false

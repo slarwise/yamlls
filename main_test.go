@@ -156,7 +156,7 @@ hej: du
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			errors, fail := validateFile(test.contents)
+			errors, fail := fileValidate(test.contents)
 			if fail != VALIDATION_FAILURE_REASON_NOT_A_FAILURE {
 				t.Fatalf("expected validation to work, got %s", fail)
 			}
@@ -209,7 +209,7 @@ was: blue
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			ranges := getDocumentPositions(test.file)
+			ranges := fileDocumentPositions(test.file)
 			if len(ranges) != len(test.ranges) {
 				t.Fatalf("Expected %d ranges, got %d", test.ranges, ranges)
 			}
@@ -526,7 +526,7 @@ func TestSchemaDocs(t *testing.T) {
 			if err := json.Unmarshal([]byte(test.schema), &s); err != nil {
 				t.Fatal(err)
 			}
-			docs, err := docs([]byte(test.schema))
+			docs, err := schemaDocs([]byte(test.schema))
 			if err != nil {
 				t.Fatalf("got unexpected error when creating docs: %s", err)
 			}
@@ -580,7 +580,7 @@ func TestDocumentPaths(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			paths := yamlDocumentPaths([]byte(test.document))
+			paths := documentPaths([]byte(test.document))
 			if len(paths) != len(test.paths) {
 				t.Fatalf("expected %d paths, got %v", len(test.paths), paths)
 			}
@@ -610,7 +610,7 @@ func TestFillDocument(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			filled, err := fill([]byte(test.schema), test.path)
+			filled, err := schemaFill([]byte(test.schema), test.path)
 			if err != nil {
 				t.Fatalf("unexpected error: %s", err)
 			}
