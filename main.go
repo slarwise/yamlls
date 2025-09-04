@@ -401,6 +401,7 @@ func (t *Type) UnmarshalJSON(b []byte) error {
 type SchemaProperty struct {
 	Path, Description, Type string
 	Required                bool
+	Enum                    []string
 }
 
 func schemaDocs(schema []byte) ([]SchemaProperty, error) {
@@ -414,6 +415,9 @@ func schemaDocs(schema []byte) ([]SchemaProperty, error) {
 
 func docs2(path string, s Schema, root []byte) []SchemaProperty {
 	docs := []SchemaProperty{{Path: path, Description: s.Description, Type: typeString(s)}}
+	if len(s.Enum) > 0 {
+		docs[0].Enum = s.Enum
+	}
 	for prop /* webdev moment */, schema := range s.Properties {
 		subPath := path + "." + prop
 		if path == "." {
@@ -511,6 +515,10 @@ func htmlDocs(docs []SchemaProperty, highlightProperty string) string {
 		fmt.Fprintf(&output, `    <span class="path" id="%s">%s</span> <code%s>[%s]</code>`, property.Path, property.Path, requiredClass, property.Type)
 
 		fmt.Fprintln(&output)
+		if len(property.Enum) > 0 {
+			fmt.Fprint(&output, "    <br>\n")
+			fmt.Fprintf(&output, "    [%s]\n", strings.Join(property.Enum, ", "))
+		}
 		if property.Description != "" {
 			fmt.Fprint(&output, "    <br>\n")
 			fmt.Fprintf(&output, "    %s\n", property.Description)
