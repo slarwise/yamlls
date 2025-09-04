@@ -91,6 +91,7 @@ tail -f ~/Library/Caches/yamlls/log | jq # Follow the logs from yamlls (on a mac
 - Kustomization: Warn when not all files are included in resources
 - Better navigation through documentation. Maybe a file explorer view as an alternative to a flat view?
 - Support schemas from https://www.schemastore.org
+- Support reading the schema from the start of a document, useful when you cannot determine the schema from the contents or filename. E.g. helm values.
 
 ## Bugs
 
