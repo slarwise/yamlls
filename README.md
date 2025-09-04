@@ -8,7 +8,6 @@
 - Code Action: Fill the field under the cursor with zero values
 - Diagnostics: Validate yaml syntax
 - Diagnostics: Validate against schema
-- UPDATE: Not anymore, need to add it back: Kustomization: Warn when not all yaml files in the current dir are included as resources
 
 ## Automatically detected schemas
 
@@ -16,7 +15,6 @@
   Detected from `kind` and `apiVersion`.
 - [Custom Resource Definitions](https://github.com/datreeio/CRDs-catalog).
   Detected from `kind` and `apiVersion`.
-- UPDATE: Not anymore, need to add it back: [JSON Schema Store](https://json.schemastore.org). Detected from filename.
 
 ## Installation
 
@@ -88,11 +86,11 @@ tail -f ~/Library/Caches/yamlls/log | jq # Follow the logs from yamlls (on a mac
   - Suggest `enum`s from the schema
 - Code actions
   - Add all files in the current directory to .resources in a Kustomization file
-- Background http server
-  - Show external documentation in a nice way for the currently open file. Can
-    do this since we get notifications when the user changes file.
 - Workspace: If there is an kustomization file, connect the resources somehow?
   And give info if there are things that don't match
+- Kustomization: Warn when not all files are included in resources
+- Better navigation through documentation. Maybe a file explorer view as an alternative to a flat view?
+- Support schemas from https://www.schemastore.org
 
 ## Bugs
 
