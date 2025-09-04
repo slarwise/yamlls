@@ -169,6 +169,7 @@ func refreshDatabase() error {
 			// NOTE: We want the group in schema id to be the full group, e.g. `networking.k8s.io`
 			//       But the group in the filename in the git repo is just `networking`
 			baseName := strings.Replace(schemaId, group, groupFirstPart, 1) + ".json"
+			baseName = strings.ReplaceAll(baseName, "_", "-")
 			schemaUrl := fmt.Sprintf("%s/%s", NATIVE_SCHEMAS_BASE_URL, strings.ToLower(baseName))
 			definitionsToDownload = append(definitionsToDownload, Definition{url: schemaUrl, basename: schemaId + ".json"})
 		}
@@ -337,7 +338,7 @@ type GVK struct{ group, version, kind string }
 
 func schemaIdToGvk(id string) GVK {
 	id = strings.TrimSuffix(id, ".json")
-	split := strings.Split(id, "-")
+	split := strings.Split(id, "_")
 	gvk := GVK{kind: split[0]}
 	if len(split) == 2 {
 		gvk.version = split[1]
@@ -349,9 +350,9 @@ func schemaIdToGvk(id string) GVK {
 }
 
 func gvkToSchemaId(group, version, kind string) string {
-	id := kind + "-"
+	id := kind + "_"
 	if group != "" {
-		id += group + "-"
+		id += group + "_"
 	}
 	id += version
 	return id
@@ -865,6 +866,10 @@ func lspInitialize(params json.RawMessage) (any, error) {
 			ExecuteCommandProvider: &protocol.ExecuteCommandOptions{
 				Commands: []string{"open-docs", "fill"},
 			},
+			CompletionProvider: &protocol.CompletionOptions{
+				// ResolveProvider:   false,
+				// TriggerCharacters: []string{},
+			},
 		},
 		ServerInfo: &protocol.ServerInfo{Name: "yamlls"},
 	}
@@ -968,8 +973,63 @@ func lspTextDocumentHover(rawParams json.RawMessage) (any, error) {
 }
 
 func lspTextDocumentCompletion(rawParams json.RawMessage) (any, error) {
-	logger.Info("Receiver textDocument/completion request, not supported")
-	return nil, nil
+	logger.Info("Receiver textDocument/completion request")
+	var params protocol.CompletionParams
+	if err := json.Unmarshal(rawParams, &params); err != nil {
+		return nil, err
+	}
+	fileContents := filenameToContents[params.TextDocument.URI.Filename()]
+	lines := strings.Split(fileContents, "\n")
+	currentLine := lines[params.Position.Line]
+	completionItems := []protocol.CompletionItem{}
+	if strings.HasPrefix(currentLine, "ap") {
+		var kind, apiVersion string
+		for _, lineRange := range fileDocumentPositions(fileContents) {
+			if lineRange.Start <= int(params.Position.Line) && int(params.Position.Line) < lineRange.End {
+				currentDocument := strings.Join(lines[lineRange.Start:lineRange.End], "\n")
+				kind, apiVersion = documentKindAndApiVersion(currentDocument)
+				break
+			}
+		}
+		if kind == "" || apiVersion != "" {
+			return nil, nil
+		}
+		schemaIds, err := schemaIds()
+		if err != nil {
+			logger.Error("list schema ids", "err", err.Error())
+		}
+		var apiVersions []string
+		for _, schemaId := range schemaIds {
+			if strings.HasPrefix(schemaId, kind+"_") {
+				gvk := schemaIdToGvk(schemaId)
+				if gvk.group == "" {
+					apiVersions = append(apiVersions, gvk.version)
+				} else {
+					apiVersions = append(apiVersions, gvk.group+"/"+gvk.version)
+				}
+			}
+		}
+		for _, apiVersion := range apiVersions {
+			newText := "apiVersion: " + apiVersion
+			completionItems = append(completionItems, protocol.CompletionItem{
+				Label: newText,
+				TextEdit: &protocol.TextEdit{
+					Range: protocol.Range{
+						Start: protocol.Position{
+							Line:      params.Position.Line,
+							Character: 0,
+						},
+						End: protocol.Position{
+							Line:      params.Position.Line,
+							Character: 999,
+						},
+					},
+					NewText: newText,
+				},
+			})
+		}
+	}
+	return completionItems, nil
 }
 
 var arrayPath = regexp.MustCompile(`\.\d+`)
@@ -1140,6 +1200,20 @@ func documentGVK(docBytes []byte) (GVK, bool) {
 		}
 	}
 	return gvk, true
+}
+
+func documentKindAndApiVersion(doc string) (string, string) {
+	// Get the kind and apiVersion from a potentially invalid yaml document
+	var kind, apiVersion string
+	for _, line := range strings.Split(doc, "\n") {
+		if strings.HasPrefix(line, "kind: ") {
+			kind = line[6:]
+		}
+		if strings.HasPrefix(line, "apiVersion: ") {
+			apiVersion = line[12:]
+		}
+	}
+	return kind, apiVersion
 }
 
 func pathAtCursor(paths Paths, line, char int) (string, Range, bool) {
