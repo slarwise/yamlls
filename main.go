@@ -1497,6 +1497,10 @@ func schemaZeroValue(s Schema) any {
 	switch {
 	case s.Properties != nil:
 		return map[string]any{}
+	case len(s.Enum) > 0:
+		return s.Enum[0]
+	case s.Const != "":
+		return s.Const
 	case s.Type.One != "":
 		return typeZeroValue(s.Type.One)
 	case len(s.Type.Many) > 0:
@@ -1506,10 +1510,6 @@ func schemaZeroValue(s Schema) any {
 			}
 		}
 		return nil
-	case len(s.Enum) > 0:
-		return s.Enum[0]
-	case s.Const != "":
-		return s.Const
 	case len(s.AnyOf) > 0:
 		return schemaZeroValue(s.AnyOf[0])
 	case len(s.OneOf) > 0:

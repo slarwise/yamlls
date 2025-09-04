@@ -234,6 +234,9 @@ var const_ string
 //go:embed testdata/enum.json
 var enum string
 
+//go:embed testdata/enum-with-type-string.json
+var enumWithTypeString string
+
 //go:embed testdata/x-kubernetes-preserve-unknown-fields.json
 var xKubernetesPreserveUnknownFields string
 
@@ -603,6 +606,12 @@ func TestFillDocument(t *testing.T) {
 	}{
 		"enum": {
 			schema: enum,
+			path:   ".",
+			expected: `level: info
+`,
+		},
+		"enumWithTypeString": {
+			schema: enumWithTypeString,
 			path:   ".",
 			expected: `level: info
 `,
