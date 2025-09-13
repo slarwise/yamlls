@@ -93,6 +93,7 @@ tail -f ~/Library/Caches/yamlls/log | jq # Follow the logs from yamlls (on a mac
 - Support schemas from https://www.schemastore.org
 - Support reading the schema from the start of a document, useful when you cannot determine the schema from the contents or filename. E.g. helm values.
 - Show the available enums in the documentation
+- Make a code action that mimics all available `kubectl <resource> --dry-run=client --output=yaml` with the most basic set of flags needed. So that you can insert a Deployment or an Ingress for example, similar to `fill`. Remove read-only fields like `.status` and `.metadata.creationTimestamp`.
 
 ## Bugs
 
