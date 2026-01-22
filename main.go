@@ -367,7 +367,7 @@ type Schema struct {
 	AllOf       []Schema          `json:"allOf"`
 	OneOf       []Schema          `json:"oneOf"`
 	Const       string            `json:"const"`
-	Enum        []string          `json:"enum"`
+	Enum        []any             `json:"enum"`
 	Ref         string            `json:"$ref"`
 	Required    []string          `json:"required"`
 }
@@ -402,7 +402,7 @@ func (t *Type) UnmarshalJSON(b []byte) error {
 type SchemaProperty struct {
 	Path, Description, Type string
 	Required                bool
-	Enum                    []string
+	Enum                    []any
 }
 
 func schemaDocs(schema []byte) ([]SchemaProperty, error) {
@@ -518,7 +518,22 @@ func htmlDocs(docs []SchemaProperty, highlightProperty string) string {
 		fmt.Fprintln(&output)
 		if len(property.Enum) > 0 {
 			fmt.Fprint(&output, "    <br>\n")
-			fmt.Fprintf(&output, "    [%s]\n", strings.Join(property.Enum, ", "))
+			var enumValues []string
+			for _, enum := range property.Enum {
+				switch e := enum.(type) {
+				case string:
+					enumValues = append(enumValues, e)
+				case float64:
+					asString := fmt.Sprint(e)
+					if property.Type == "integer" {
+						asString = fmt.Sprint(int(e))
+					}
+					enumValues = append(enumValues, asString)
+				default:
+					logger.Error("got unexpected enum type", "type", fmt.Sprintf("%T", e), "value", e)
+				}
+			}
+			fmt.Fprintf(&output, "    [%s]\n", strings.Join(enumValues, ", "))
 		}
 		if property.Description != "" {
 			fmt.Fprint(&output, "    <br>\n")
@@ -1580,7 +1595,18 @@ func schemaZeroValue(s Schema) any {
 	case s.Properties != nil:
 		return map[string]any{}
 	case len(s.Enum) > 0:
-		return s.Enum[0]
+		first := s.Enum[0]
+		result := first
+		switch e := first.(type) {
+		case string:
+			result = e
+		case float64:
+			result = e
+			if s.Type.One == "integer" || slices.Contains(s.Type.Many, "integer") {
+				result = int(e)
+			}
+		}
+		return result
 	case s.Const != "":
 		return s.Const
 	case s.Type.One != "":
