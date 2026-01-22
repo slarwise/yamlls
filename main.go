@@ -517,6 +517,7 @@ func htmlDocs(docs []SchemaProperty, highlightProperty string) string {
 
 		fmt.Fprintln(&output)
 		if len(property.Enum) > 0 {
+			// TODO: Duplicated code from schemaZeroValue
 			fmt.Fprint(&output, "    <br>\n")
 			var enumValues []string
 			for _, enum := range property.Enum {
@@ -1595,11 +1596,8 @@ func schemaZeroValue(s Schema) any {
 	case s.Properties != nil:
 		return map[string]any{}
 	case len(s.Enum) > 0:
-		first := s.Enum[0]
-		result := first
-		switch e := first.(type) {
-		case string:
-			result = e
+		result := s.Enum[0]
+		switch e := result.(type) {
 		case float64:
 			result = e
 			if s.Type.One == "integer" || slices.Contains(s.Type.Many, "integer") {
