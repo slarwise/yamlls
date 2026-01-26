@@ -237,6 +237,9 @@ var enum string
 //go:embed testdata/enum-with-type-string.json
 var enumWithTypeString string
 
+//go:embed testdata/enum-with-type-integer.json
+var enumWithTypeInteger string
+
 //go:embed testdata/x-kubernetes-preserve-unknown-fields.json
 var xKubernetesPreserveUnknownFields string
 
@@ -614,6 +617,12 @@ func TestFillDocument(t *testing.T) {
 			schema: enumWithTypeString,
 			path:   ".",
 			expected: `level: info
+`,
+		},
+		"enumWithTypeInteger": {
+			schema: enumWithTypeInteger,
+			path:   ".",
+			expected: `status: 200
 `,
 		},
 	}

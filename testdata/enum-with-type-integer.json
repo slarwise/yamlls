@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "enum": [200, 400, 500],
+      "description": "A http status code",
+      "type": "integer"
+    }
+  },
+  "required": ["status"]
+}
