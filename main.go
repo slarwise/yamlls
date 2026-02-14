@@ -19,8 +19,6 @@ import (
 	"sync"
 
 	"github.com/goccy/go-yaml"
-	"github.com/goccy/go-yaml/ast"
-	yamlparser "github.com/goccy/go-yaml/parser"
 	"github.com/tidwall/gjson"
 	"github.com/xeipuuv/gojsonschema"
 	"go.lsp.dev/protocol"
@@ -629,7 +627,7 @@ func fileValidate(file string) ([]ValidationError, ValidationFailureReason) {
 			return nil, VALIDATION_FAILURE_REASON_SCHEMA_INVALID
 		}
 
-		paths := documentPaths([]byte(documentString))
+		paths := documentPaths(documentString)
 		for _, e := range res.Errors() {
 			var field string
 			if e.Field() == "(root)" {
@@ -657,16 +655,6 @@ func fileValidate(file string) ([]ValidationError, ValidationFailureReason) {
 	return validationErrors, VALIDATION_FAILURE_REASON_NOT_A_FAILURE
 }
 
-type Range struct{ Start, End Position } // zero-based, the start character is inclusive and the end character is exclusive
-type Position struct{ Line, Char int }   // zero-based
-
-func newRange(startLine, startChar, endLine, endChar int) Range {
-	return Range{
-		Start: Position{Line: startLine, Char: startChar},
-		End:   Position{Line: endLine, Char: endChar},
-	}
-}
-
 type lineRange struct{ Start, End int } // [Start, End), 0-indexed
 
 func fileDocumentPositions(file string) []lineRange {
@@ -688,87 +676,6 @@ func fileDocumentPositions(file string) []lineRange {
 		}
 	}
 	return ranges
-}
-
-func documentPaths(doc []byte) Paths {
-	astFile, err := yamlparser.ParseBytes([]byte(doc), 0)
-	if err != nil {
-		panicf("expected a valid yaml document: %v", err)
-	}
-	if len(astFile.Docs) != 1 {
-		panicf("expected 1 document, got %d", len(astFile.Docs))
-	}
-	paths := Paths{}
-	ast.Walk(&paths, astFile.Docs[0])
-	return paths
-}
-
-type Paths map[string]Range
-
-var (
-	arrayPattern          = regexp.MustCompile(`\[(\d+)\]`)
-	endingIndex           = regexp.MustCompile(`\.(\d+)$`)
-	endingIndexInBrackets = regexp.MustCompile(`\[(\d+)\]$`)
-)
-
-func (p Paths) Visit(node ast.Node) ast.Visitor {
-	if node.Type() == ast.MappingValueType || node.Type() == ast.DocumentType {
-		return p
-	}
-	path := strings.TrimPrefix(node.GetPath(), "$")
-	if path == "" {
-		path = "."
-	}
-	path = arrayPattern.ReplaceAllString(path, ".$1")
-	if node.Type() == ast.MappingType && endingIndex.MatchString(path) {
-		// The path looks like spec.ports[1] here
-		// This is the `:` in the first element in an object array
-		// Not sure why it's only on the first one
-		// Use the parent path to compute the column
-		parent := endingIndex.ReplaceAllString(path, "")
-		var char int
-		for existingPath, pos := range p {
-			if existingPath == parent {
-				char = pos.Start.Char + 2 // NOTE: Assuming that lists are indented here
-			}
-		}
-		t := node.GetToken()
-		p[path] = Range{
-			Start: Position{
-				Line: t.Position.Line - 1,
-				Char: char,
-			},
-			End: Position{
-				Line: t.Position.Line - 1,
-				Char: char + 1,
-			},
-		}
-		return p
-	}
-	// Turn spec.ports[0].port into spec.ports.0.port
-	// path = arrayPattern.ReplaceAllString(path, ".$1")
-	if _, found := p[path]; found {
-		// Store the path to the key only, not the value
-		// Assumes that the key is always visited first, couldn't find a way to distinguish
-		// key nodes and value nodes
-		return p
-	}
-	t := node.GetToken()
-	if path == "." {
-		p[path] = Range{}
-		return p
-	}
-	p[path] = Range{
-		Start: Position{
-			Line: t.Position.Line - 1,
-			Char: t.Position.Column - 1,
-		},
-		End: Position{
-			Line: t.Position.Line - 1,
-			Char: t.Position.Column + len(t.Value) - 1,
-		},
-	}
-	return p
 }
 
 var exitChannel chan (int)
@@ -949,8 +856,7 @@ func lspTextDocumentHover(rawParams json.RawMessage) (any, error) {
 	if currentDocument == "" {
 		return nil, nil
 	}
-	paths := documentPaths([]byte(currentDocument))
-	pathAtCursor, _, found := pathAtCursor(paths, lineInDocument, int(params.Position.Character))
+	pathAtCursor, _, found := pathAtPosition(currentDocument, lineInDocument, int(params.Position.Character))
 	if !found {
 		return nil, nil
 	}
@@ -1075,8 +981,7 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 	if currentDocument == "" {
 		return codeActions, nil
 	}
-	paths := documentPaths([]byte(currentDocument))
-	pathAtCursor, pathRangeAtCursor, found := pathAtCursor(paths, lineInDocument, int(params.Range.Start.Character))
+	pathAtCursor, pathRangeAtCursor, found := pathAtPosition(currentDocument, lineInDocument, int(params.Range.Start.Character))
 	if found {
 		// Turn spec.ports.0.name into spec.ports[].name
 		// TODO: pathAtCursor should return a good path
@@ -1240,15 +1145,6 @@ func documentKindAndApiVersion(doc string) (string, string) {
 		}
 	}
 	return kind, apiVersion
-}
-
-func pathAtCursor(paths Paths, line, char int) (string, Range, bool) {
-	for path, r := range paths {
-		if r.Start.Line == line && r.Start.Char <= char && char < r.End.Char {
-			return path, r, true
-		}
-	}
-	return "", Range{}, false
 }
 
 const protocolVersion = "2.0"
