@@ -957,7 +957,10 @@ func lspTextDocumentHover(rawParams json.RawMessage) (any, error) {
 
 	gvk, ok := documentGVK([]byte(currentDocument))
 	if !ok {
-		return nil, errors.New("no kind and apiVersion found")
+		return nil, errors.New("invalid yaml")
+	}
+	if gvk.kind == "" || gvk.version == "" {
+		return nil, errors.New("no kind or apiVersion found")
 	}
 	schemaId := gvkToSchemaId(gvk.group, gvk.version, gvk.kind)
 	schema, err := readSchema(schemaId + ".json")
@@ -1082,7 +1085,10 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 
 	gvk, ok := documentGVK([]byte(currentDocument))
 	if !ok {
-		return codeActions, errors.New("no kind and apiVersion found")
+		return nil, errors.New("invalid yaml")
+	}
+	if gvk.kind == "" || gvk.version == "" {
+		return nil, errors.New("no kind or apiVersion found")
 	}
 	schemaId := gvkToSchemaId(gvk.group, gvk.version, gvk.kind)
 	schema, err := readSchema(schemaId + ".json")
@@ -1193,17 +1199,21 @@ func lspMethodWorkspaceExecuteCommand(rawParams json.RawMessage) (any, error) {
 
 // Return false if yaml is invalid
 func documentGVK(docBytes []byte) (GVK, bool) {
-	var document map[string]any
+	var document any
 	if err := yaml.Unmarshal(docBytes, &document); err != nil {
 		return GVK{}, false
 	}
+	doc, ok := document.(map[string]any)
+	if !ok {
+		return GVK{}, true
+	}
 	var gvk GVK
-	if kind_, ok := document["kind"]; ok {
+	if kind_, ok := doc["kind"]; ok {
 		if kind, ok := kind_.(string); ok {
 			gvk.kind = kind
 		}
 	}
-	if apiVersion_, ok := document["apiVersion"]; ok {
+	if apiVersion_, ok := doc["apiVersion"]; ok {
 		if apiVersion, ok := apiVersion_.(string); ok {
 			split := strings.Split(apiVersion, "/")
 			switch len(split) {
