@@ -839,25 +839,15 @@ func lspTextDocumentHover(rawParams json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("no schema found for %s", schemaId)
 	}
 
-	docs, err := schemaDocs(schema)
-	if err != nil {
-		return nil, fmt.Errorf("create docs: %s", err)
-	}
-
-	// Turn spec.ports.0.name into spec.ports[].name
-	pathAtCursor = arrayPath.ReplaceAllString(pathAtCursor, "[]")
-	for _, property := range docs {
-		if property.Path == pathAtCursor {
-			if property.Description == "" {
-				break
-			}
-			return protocol.Hover{
-				Contents: protocol.MarkupContent{
-					Kind:  protocol.PlainText,
-					Value: property.Description,
-				},
-			}, nil
-		}
+	schemaPath := pathToSchemaPath(pathAtCursor)
+	result := gjson.GetBytes(schema, schemaPath+".description")
+	if result.Exists() && result.Type == gjson.String {
+		return protocol.Hover{
+			Contents: protocol.MarkupContent{
+				Kind:  protocol.PlainText,
+				Value: result.String(),
+			},
+		}, nil
 	}
 	return nil, nil
 }

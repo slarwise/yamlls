@@ -3,6 +3,7 @@ package main
 import (
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/goccy/go-yaml/ast"
 	yamlparser "github.com/goccy/go-yaml/parser"
@@ -104,4 +105,24 @@ func pathAtPosition(doc string, line, char int) (string, Range, bool) {
 		}
 	}
 	return "", Range{}, false
+}
+
+func pathToSchemaPath(path string) string {
+	schemaSegments := []string{}
+	segments := strings.FieldsFunc(path, func(r rune) bool { return r == '.' })
+	for _, segment := range segments {
+		isArrayIndex := true
+		for _, r := range segment {
+			if !unicode.IsDigit(r) {
+				isArrayIndex = false
+				break
+			}
+		}
+		if isArrayIndex {
+			schemaSegments = append(schemaSegments, "items")
+		} else {
+			schemaSegments = append(schemaSegments, "properties", segment)
+		}
+	}
+	return "." + strings.Join(schemaSegments, ".")
 }

@@ -87,3 +87,35 @@ func TestPathAtPosition(t *testing.T) {
 		})
 	}
 }
+
+func TestPathToSchemaPath(t *testing.T) {
+	tests := map[string]struct {
+		path, schemaPath string
+	}{
+		"simple": {
+			path:       ".spec",
+			schemaPath: ".properties.spec",
+		},
+		"nested": {
+			path:       ".spec.ports",
+			schemaPath: ".properties.spec.properties.ports",
+		},
+		"array": {
+			path:       ".spec.ports.0",
+			schemaPath: ".properties.spec.properties.ports.items",
+		},
+		"nested-array": {
+			path:       ".spec.ports.0.name.23.yolo",
+			schemaPath: ".properties.spec.properties.ports.items.properties.name.items.properties.yolo",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			schemaPath := pathToSchemaPath(test.path)
+			if schemaPath != test.schemaPath {
+				t.Fatalf("expected `%v`, got `%v", test.schemaPath, schemaPath)
+			}
+		})
+	}
+}
