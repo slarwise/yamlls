@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -65,14 +66,6 @@ func run() error {
 		case "schemas":
 			if err := listSchemas(); err != nil {
 				return fmt.Errorf("list schemas: %s", err)
-			}
-		case "docs":
-			if len(args) == 0 {
-				return fmt.Errorf("must provide `basename`, e.g. `yamlls docs Deployment-apps-v1.json`. Get the basename from `yamlls schemas`.")
-			}
-			basename := args[0]
-			if err := showDocs(basename); err != nil {
-				return fmt.Errorf("get docs: %s", err)
 			}
 		case "fill":
 			var basename string
@@ -298,19 +291,6 @@ func schemaIds() ([]string, error) {
 	return ids, nil
 }
 
-func showDocs(basename string) error {
-	schema, err := readSchema(basename)
-	if err != nil {
-		return fmt.Errorf("read schema %s: %s", basename, err)
-	}
-	docs, err := schemaDocs(schema)
-	if err != nil {
-		return fmt.Errorf("create docs for %s: %s", basename, err)
-	}
-	fmt.Print(htmlDocs(docs, ""))
-	return nil
-}
-
 var schemaCache = map[string][]byte{}
 
 var ErrSchemaNotExist = errors.New("no schema found")
@@ -488,67 +468,15 @@ func panicf(format string, args ...any) {
 	panic(fmt.Sprintf(format, args...))
 }
 
-func htmlDocs(docs []SchemaProperty, highlightProperty string) string {
-	output := strings.Builder{}
-	fmt.Fprint(&output, `<!DOCTYPE html>
-<html>
-<head>
-  <title>Documentation</title>
-  <style>
-    body {background-color: #3f3f3f; color: #DCDCCC; font-size: 18px; }
-    code {font-size: 80%;}
-    code.required {color: #E0CF9F;}
-    span.path {color: #DCA3A3; }
-  </style>
-</head>
-`)
-	fmt.Fprintln(&output, "<body>")
+const DOC_COMMAND = "generate-schema-doc"
 
-	for _, property := range docs {
-		fmt.Fprintln(&output, "  <p>")
-
-		requiredClass := ""
-		if property.Required {
-			requiredClass = ` class="required"`
-		}
-		fmt.Fprintf(&output, `    <span class="path" id="%s">%s</span> <code%s>[%s]</code>`, property.Path, property.Path, requiredClass, property.Type)
-
-		fmt.Fprintln(&output)
-		if len(property.Enum) > 0 {
-			// TODO: Duplicated code from schemaZeroValue
-			fmt.Fprint(&output, "    <br>\n")
-			var enumValues []string
-			for _, enum := range property.Enum {
-				switch e := enum.(type) {
-				case string:
-					enumValues = append(enumValues, e)
-				case float64:
-					asString := fmt.Sprint(e)
-					if property.Type == "integer" {
-						asString = fmt.Sprint(int(e))
-					}
-					enumValues = append(enumValues, asString)
-				default:
-					logger.Error("got unexpected enum type", "type", fmt.Sprintf("%T", e), "value", e)
-				}
-			}
-			fmt.Fprintf(&output, "    [%s]\n", strings.Join(enumValues, ", "))
-		}
-		if property.Description != "" {
-			fmt.Fprint(&output, "    <br>\n")
-			fmt.Fprintf(&output, "    %s\n", property.Description)
-		}
-		fmt.Fprintln(&output, "  </p>")
+func htmlDocs(schemaPath string) (string, error) {
+	cmd := exec.Command(DOC_COMMAND, schemaPath)
+	cmd.Dir = CACHE_DIR
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("generate html docs: %v", err)
 	}
-
-	if highlightProperty != "" {
-		fmt.Fprintf(&output, `  <script>window.location.hash = "%s"</script>`, highlightProperty)
-		fmt.Fprintln(&output, "")
-	}
-
-	fmt.Fprintln(&output, "</body>")
-	fmt.Fprintln(&output, "</html>")
-	return output.String()
+	return filepath.Join(CACHE_DIR, "schema_doc.html"), nil
 }
 
 type Severity int
@@ -947,26 +875,17 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 
 	{
 		// open-docs
-		docs, err := schemaDocs(schema)
-		if err != nil {
-			return nil, fmt.Errorf("create docs: %s", err)
+		schemaFilepath := filepath.Join(DB_DIR, schemaId+".json")
+		if _, err := exec.LookPath(DOC_COMMAND); err == nil {
+			codeActions = append(codeActions, protocol.CodeAction{
+				Title: "Open documentation",
+				Command: &protocol.Command{
+					Title:     "Open documentation",
+					Command:   "open-docs",
+					Arguments: []any{schemaFilepath},
+				},
+			})
 		}
-		html := htmlDocs(docs, pathAtCursor)
-
-		filename := filepath.Join(CACHE_DIR, "docs.html")
-		if err := os.WriteFile(filename, []byte(html), 0755); err != nil {
-			slog.Error("write html documentation to file", "err", err, "file", filename)
-			return "", errors.New("failed to write docs to file")
-		}
-		htmlDocsUri := "file://" + filename
-		codeActions = append(codeActions, protocol.CodeAction{
-			Title: "Open documentation",
-			Command: &protocol.Command{
-				Title:     "Open documentation",
-				Command:   "open-docs",
-				Arguments: []any{htmlDocsUri},
-			},
-		})
 	}
 
 	{
@@ -1030,10 +949,15 @@ func lspMethodWorkspaceExecuteCommand(rawParams json.RawMessage) (any, error) {
 	switch params.Command {
 	case "open-docs":
 		if len(params.Arguments) != 1 {
-			return "", fmt.Errorf("Must provide 1 argument to open-docs: the uri")
+			return "", fmt.Errorf("Must provide 1 argument to open-docs: the filepath to the schema")
 		}
-		viewerURL := params.Arguments[0].(string)
-		uri := uri.URI(viewerURL)
+		schemaFilepath := params.Arguments[0].(string)
+		docsFilepath, err := htmlDocs(schemaFilepath)
+		if err != nil {
+			return nil, errors.New("failed to generate html docs")
+		}
+
+		uri := uri.URI("file://" + docsFilepath)
 		showDocumentParams := protocol.ShowDocumentParams{
 			URI:       uri,
 			External:  true,

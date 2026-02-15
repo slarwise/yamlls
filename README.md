@@ -101,6 +101,5 @@ tail -f ~/Library/Caches/yamlls/log | jq # Follow the logs from yamlls (on a mac
 
 ## Credits
 
-The first version of this repo was basically copied from
-[a-h/examplelsp](https://github.com/a-h/examplelsp), which is an awesome
-starting point for understanding how to write a language server!
+- The first version of this repo was basically copied from [a-h/examplelsp](https://github.com/a-h/examplelsp), which is an awesome starting point for understanding how to write a language server!
+- Uses [json-schema-for-humans](https://github.com/coveooss/json-schema-for-humans) to generate documentation, thank you!
