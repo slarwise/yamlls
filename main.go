@@ -574,16 +574,13 @@ const (
 )
 
 func fileValidate(file string) ([]ValidationError, ValidationFailureReason) {
-	lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
-	positions := fileDocumentPositions(file)
+	documents := documentsInFile(file)
 	var validationErrors []ValidationError
-	for _, docPos := range positions {
-		documentString := strings.Join(lines[docPos.Start:docPos.End], "\n")
-
-		gvk, ok := documentGVK([]byte(documentString))
+	for _, doc := range documents {
+		gvk, ok := documentGVK([]byte(doc.document))
 		if !ok {
 			validationErrors = append(validationErrors, ValidationError{
-				Range:    newRange(docPos.Start, 0, docPos.End, 0),
+				Range:    newRange(doc.start, 0, doc.end, 0),
 				Message:  "invalid yaml",
 				Type:     "invalid_yaml",
 				Severity: SEVERITY_ERROR,
@@ -604,7 +601,7 @@ func fileValidate(file string) ([]ValidationError, ValidationFailureReason) {
 					apiVersion = gvk.version
 				}
 				validationErrors = append(validationErrors, ValidationError{
-					Range:    newRange(docPos.Start, 0, docPos.Start, 0),
+					Range:    newRange(doc.start, 0, doc.start, 0),
 					Message:  fmt.Sprintf("no schema found for %s %s", gvk.kind, apiVersion),
 					Type:     "no_schema_found",
 					Severity: SEVERITY_WARN,
@@ -616,9 +613,9 @@ func fileValidate(file string) ([]ValidationError, ValidationFailureReason) {
 		}
 		schemaLoader := gojsonschema.NewBytesLoader(schemaBytes)
 
-		jsonDocument, err := yaml.YAMLToJSON([]byte(documentString))
+		jsonDocument, err := yaml.YAMLToJSON([]byte(doc.document))
 		if err != nil {
-			panicf("this yaml document was valid a few lines above: %s", documentString)
+			panicf("this yaml document was valid a few lines above: %s", doc.document)
 		}
 		documentLoader := gojsonschema.NewBytesLoader(jsonDocument)
 
@@ -627,7 +624,7 @@ func fileValidate(file string) ([]ValidationError, ValidationFailureReason) {
 			return nil, VALIDATION_FAILURE_REASON_SCHEMA_INVALID
 		}
 
-		paths := documentPaths(documentString)
+		paths := documentPaths(doc.document)
 		for _, e := range res.Errors() {
 			var field string
 			if e.Field() == "(root)" {
@@ -646,36 +643,13 @@ func fileValidate(file string) ([]ValidationError, ValidationFailureReason) {
 				panicf("expected path `%s` to exist in the document. Available paths: %v. Error type: %s", field, paths, e.Type())
 			}
 			validationErrors = append(validationErrors, ValidationError{
-				Range:   newRange(docPos.Start+range_.Start.Line, range_.Start.Char, docPos.Start+range_.End.Line, range_.End.Char),
+				Range:   newRange(doc.start+range_.Start.Line, range_.Start.Char, doc.start+range_.End.Line, range_.End.Char),
 				Message: e.Description(),
 				Type:    e.Type(), // I've got life!
 			})
 		}
 	}
 	return validationErrors, VALIDATION_FAILURE_REASON_NOT_A_FAILURE
-}
-
-type lineRange struct{ Start, End int } // [Start, End), 0-indexed
-
-func fileDocumentPositions(file string) []lineRange {
-	var ranges []lineRange
-	startLine := 0
-	lines := strings.FieldsFunc(file, func(r rune) bool { return r == '\n' })
-	for i, line := range lines {
-		if line == "---" {
-			ranges = append(ranges, lineRange{
-				Start: startLine,
-				End:   i,
-			})
-			startLine = i + 1
-		} else if i == len(lines)-1 {
-			ranges = append(ranges, lineRange{
-				Start: startLine,
-				End:   i + 1,
-			})
-		}
-	}
-	return ranges
 }
 
 var exitChannel chan (int)
@@ -841,19 +815,10 @@ func lspTextDocumentHover(rawParams json.RawMessage) (any, error) {
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err
 	}
-	contents := filenameToContents[params.TextDocument.URI.Filename()]
+	file := filenameToContents[params.TextDocument.URI.Filename()]
 
-	documentPositions := fileDocumentPositions(contents)
-	var currentDocument string
-	var lineInDocument int
-	for _, r := range documentPositions {
-		if r.Start <= int(params.Position.Line) && int(params.Position.Line) < r.End {
-			lines := strings.FieldsFunc(contents, func(r rune) bool { return r == '\n' })
-			currentDocument = strings.Join(lines[r.Start:r.End], "\n")
-			lineInDocument = int(params.Position.Line) - r.Start
-		}
-	}
-	if currentDocument == "" {
+	currentDocument, lineInDocument, found := documentAtPosition(file, int(params.Position.Line))
+	if !found {
 		return nil, nil
 	}
 	pathAtCursor, _, found := pathAtPosition(currentDocument, lineInDocument, int(params.Position.Character))
@@ -903,56 +868,55 @@ func lspTextDocumentCompletion(rawParams json.RawMessage) (any, error) {
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return nil, err
 	}
-	fileContents := filenameToContents[params.TextDocument.URI.Filename()]
-	lines := strings.Split(fileContents, "\n")
+	file := filenameToContents[params.TextDocument.URI.Filename()]
+	lines := strings.Split(file, "\n")
 	currentLine := lines[params.Position.Line]
+	if !strings.HasPrefix(currentLine, "ap") {
+		return nil, nil
+	}
+
 	completionItems := []protocol.CompletionItem{}
-	if strings.HasPrefix(currentLine, "ap") {
-		var kind, apiVersion string
-		for _, lineRange := range fileDocumentPositions(fileContents) {
-			if lineRange.Start <= int(params.Position.Line) && int(params.Position.Line) < lineRange.End {
-				currentDocument := strings.Join(lines[lineRange.Start:lineRange.End], "\n")
-				kind, apiVersion = documentKindAndApiVersion(currentDocument)
-				break
+	currentDocument, _, found := documentAtPosition(file, int(params.Position.Line))
+	if !found {
+		return nil, nil
+	}
+	kind, apiVersion := documentKindAndApiVersion(currentDocument)
+	if kind == "" || apiVersion != "" {
+		return nil, nil
+	}
+	schemaIds, err := schemaIds()
+	if err != nil {
+		logger.Error("list schema ids", "err", err.Error())
+	}
+	var apiVersions []string
+	for _, schemaId := range schemaIds {
+		if strings.HasPrefix(schemaId, kind+"_") {
+			gvk := schemaIdToGvk(schemaId)
+			if gvk.group == "" {
+				apiVersions = append(apiVersions, gvk.version)
+			} else {
+				apiVersions = append(apiVersions, gvk.group+"/"+gvk.version)
 			}
 		}
-		if kind == "" || apiVersion != "" {
-			return nil, nil
-		}
-		schemaIds, err := schemaIds()
-		if err != nil {
-			logger.Error("list schema ids", "err", err.Error())
-		}
-		var apiVersions []string
-		for _, schemaId := range schemaIds {
-			if strings.HasPrefix(schemaId, kind+"_") {
-				gvk := schemaIdToGvk(schemaId)
-				if gvk.group == "" {
-					apiVersions = append(apiVersions, gvk.version)
-				} else {
-					apiVersions = append(apiVersions, gvk.group+"/"+gvk.version)
-				}
-			}
-		}
-		for _, apiVersion := range apiVersions {
-			newText := "apiVersion: " + apiVersion
-			completionItems = append(completionItems, protocol.CompletionItem{
-				Label: newText,
-				TextEdit: &protocol.TextEdit{
-					Range: protocol.Range{
-						Start: protocol.Position{
-							Line:      params.Position.Line,
-							Character: 0,
-						},
-						End: protocol.Position{
-							Line:      params.Position.Line,
-							Character: 999,
-						},
+	}
+	for _, apiVersion := range apiVersions {
+		newText := "apiVersion: " + apiVersion
+		completionItems = append(completionItems, protocol.CompletionItem{
+			Label: newText,
+			TextEdit: &protocol.TextEdit{
+				Range: protocol.Range{
+					Start: protocol.Position{
+						Line:      params.Position.Line,
+						Character: 0,
 					},
-					NewText: newText,
+					End: protocol.Position{
+						Line:      params.Position.Line,
+						Character: 999,
+					},
 				},
-			})
-		}
+				NewText: newText,
+			},
+		})
 	}
 	return completionItems, nil
 }
@@ -966,25 +930,15 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 	if err := json.Unmarshal(rawParams, &params); err != nil {
 		return codeActions, err
 	}
-	contents := filenameToContents[params.TextDocument.URI.Filename()]
+	file := filenameToContents[params.TextDocument.URI.Filename()]
 
-	documentPositions := fileDocumentPositions(contents)
-	var currentDocument string
-	var lineInDocument int
-	for _, r := range documentPositions {
-		if r.Start <= int(params.Range.Start.Line) && int(params.Range.Start.Line) < r.End {
-			lines := strings.FieldsFunc(contents, func(r rune) bool { return r == '\n' })
-			currentDocument = strings.Join(lines[r.Start:r.End], "\n")
-			lineInDocument = int(params.Range.Start.Line) - r.Start
-		}
-	}
-	if currentDocument == "" {
-		return codeActions, nil
+	currentDocument, lineInDocument, found := documentAtPosition(file, int(params.Range.Start.Line))
+	if !found {
+		return nil, nil
 	}
 	pathAtCursor, pathRangeAtCursor, found := pathAtPosition(currentDocument, lineInDocument, int(params.Range.Start.Character))
 	if found {
 		// Turn spec.ports.0.name into spec.ports[].name
-		// TODO: pathAtCursor should return a good path
 		pathAtCursor = arrayPath.ReplaceAllString(pathAtCursor, "[]")
 	}
 

@@ -179,49 +179,6 @@ hej: du
 	}
 }
 
-func TestGetDocumentPositions(t *testing.T) {
-	tests := map[string]struct {
-		file   string
-		ranges []lineRange
-	}{
-		"one-doc": {
-			file: `hej: du
-`,
-			ranges: []lineRange{{0, 1}},
-		},
-		"one-doc-no-trailing-new-line": {
-			file:   `hej: du`,
-			ranges: []lineRange{{0, 1}},
-		},
-		"two-docs": {
-			file: `hej: du
-jag: heter
----
-arvid: hej
-what-if: the joker
-was: blue
-`,
-			ranges: []lineRange{
-				{0, 2},
-				{3, 6},
-			},
-		},
-	}
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			ranges := fileDocumentPositions(test.file)
-			if len(ranges) != len(test.ranges) {
-				t.Fatalf("Expected %d ranges, got %d", test.ranges, ranges)
-			}
-			for i, r := range ranges {
-				if r != test.ranges[i] {
-					t.Fatalf("expected `%v`, got `%v`", test.ranges, r)
-				}
-			}
-		})
-	}
-}
-
 //go:embed testdata/oneOf.json
 var oneOf string
 
