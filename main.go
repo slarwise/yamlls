@@ -377,93 +377,6 @@ func (t *Type) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type SchemaProperty struct {
-	Path, Description, Type string
-	Required                bool
-	Enum                    []any
-}
-
-func schemaDocs(schema []byte) ([]SchemaProperty, error) {
-	var schemaParsed Schema
-	if err := json.Unmarshal(schema, &schemaParsed); err != nil {
-		return nil, fmt.Errorf("parse schema: %s", err)
-	}
-	properties := docs2(".", schemaParsed, schema)
-	return properties, nil
-}
-
-func docs2(path string, s Schema, root []byte) []SchemaProperty {
-	docs := []SchemaProperty{{Path: path, Description: s.Description, Type: typeString(s)}}
-	if len(s.Enum) > 0 {
-		docs[0].Enum = s.Enum
-	}
-	for prop /* webdev moment */, schema := range s.Properties {
-		subPath := path + "." + prop
-		if path == "." {
-			subPath = path + prop
-		}
-		subDocs := docs2(subPath, schema, root)
-		if slices.Contains(s.Required, prop) {
-			subDocs[0].Required = true
-		}
-		docs = append(docs, subDocs...)
-	}
-	if s.Items != nil {
-		docs = append(docs, docs2(path+"[]", *s.Items, root)...)
-	}
-	for i, schema := range s.AnyOf {
-		docs = append(docs, docs2(fmt.Sprintf("%s?%d", path, i), schema, root)...)
-	}
-	for i, schema := range s.OneOf {
-		docs = append(docs, docs2(fmt.Sprintf("%s?%d", path, i), schema, root)...)
-	}
-	if len(s.AllOf) > 0 {
-		var subDocs []SchemaProperty
-		for _, schema := range s.AllOf {
-			subDocs = append(subDocs, docs2(path, schema, root)...)
-		}
-		subDocs = slices.DeleteFunc(subDocs, func(s SchemaProperty) bool {
-			return s.Path == path
-		})
-		docs = append(docs, subDocs...)
-	}
-	if s.Ref != "" {
-		// NOTE: We expect all references to be part of the same file
-		ref := strings.Split(s.Ref, "#")[1]
-		refPath := strings.ReplaceAll(ref[1:], "/", ".")
-		res := gjson.GetBytes(root, refPath)
-		if !res.Exists() {
-			panicf("could not find the reference at path %s in the root schema %s", refPath, root)
-		}
-		var refSchema Schema
-		if err := json.Unmarshal([]byte(res.Raw), &refSchema); err != nil {
-			panicf("expected ref to point to a valid schema: %s", err)
-		}
-		docs = docs2(path, refSchema, root)
-	}
-	return docs
-}
-
-func typeString(s Schema) string {
-	if s.Const != "" {
-		return "const"
-	} else if len(s.Enum) > 0 {
-		return "enum"
-	} else if len(s.AnyOf) > 0 {
-		return "anyOf"
-	} else if len(s.OneOf) > 0 {
-		return "oneOf"
-	} else if len(s.AllOf) > 0 {
-		return "allOf"
-	}
-	if s.Type.One != "" {
-		return s.Type.One
-	} else if len(s.Type.Many) > 0 {
-		return fmt.Sprintf("%s", strings.Join(s.Type.Many, ", "))
-	}
-	return ""
-}
-
 func panicf(format string, args ...any) {
 	panic(fmt.Sprintf(format, args...))
 }
@@ -1313,6 +1226,7 @@ func (m *Mux) handleRequestResponse(req Request) {
 func schemaFill(rootSchemaBytes []byte, path string) (string, error) {
 	schemaAtPath := rootSchemaBytes
 	if path != "." {
+		// TODO: Use pathToSchemaPath
 		schemaPath := strings.ReplaceAll(path, ".", ".properties.")
 		schemaPath = strings.ReplaceAll(schemaPath, "[].", ".items.")
 		schemaAtPathResult := gjson.GetBytes(rootSchemaBytes, pathToTidwallPath(schemaPath))
