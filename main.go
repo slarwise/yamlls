@@ -752,8 +752,6 @@ func lspTextDocumentCompletion(rawParams json.RawMessage) (any, error) {
 	return completionItems, nil
 }
 
-var arrayPath = regexp.MustCompile(`\.\d+`)
-
 func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 	logger.Info(fmt.Sprintf("Received %s request", protocol.MethodTextDocumentCodeAction))
 	codeActions := []protocol.CodeAction{}
@@ -768,10 +766,6 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 		return nil, nil
 	}
 	pathAtCursor, pathRangeAtCursor, found := pathAtPosition(currentDocument, lineInDocument, int(params.Range.Start.Character))
-	if found {
-		// Turn spec.ports.0.name into spec.ports[].name
-		pathAtCursor = arrayPath.ReplaceAllString(pathAtCursor, "[]")
-	}
 
 	gvk, ok := documentGVK(currentDocument)
 	if !ok {
@@ -1226,10 +1220,8 @@ func (m *Mux) handleRequestResponse(req Request) {
 func schemaFill(rootSchemaBytes []byte, path string) (string, error) {
 	schemaAtPath := rootSchemaBytes
 	if path != "." {
-		// TODO: Use pathToSchemaPath
-		schemaPath := strings.ReplaceAll(path, ".", ".properties.")
-		schemaPath = strings.ReplaceAll(schemaPath, "[].", ".items.")
-		schemaAtPathResult := gjson.GetBytes(rootSchemaBytes, pathToTidwallPath(schemaPath))
+		schemaPath := pathToSchemaPath(path)
+		schemaAtPathResult := gjson.GetBytes(rootSchemaBytes, schemaPath)
 		if !schemaAtPathResult.Exists() {
 			return "", fmt.Errorf("no schema found at path `%s`", schemaPath)
 		}
@@ -1270,13 +1262,6 @@ func schemaFill(rootSchemaBytes []byte, path string) (string, error) {
 		return "", fmt.Errorf("marshal filled schema to yaml: %s", err)
 	}
 	return string(yamlBytes), nil
-}
-
-func pathToTidwallPath(path string) string {
-	if path == "." {
-		panic("don't know what the root path is in tidwall libs")
-	}
-	return strings.TrimPrefix(path, ".")
 }
 
 func schemaZeroValue(s Schema) any {
