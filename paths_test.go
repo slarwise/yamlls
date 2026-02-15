@@ -94,19 +94,19 @@ func TestPathToSchemaPath(t *testing.T) {
 	}{
 		"simple": {
 			path:       ".spec",
-			schemaPath: ".properties.spec",
+			schemaPath: "properties.spec",
 		},
 		"nested": {
 			path:       ".spec.ports",
-			schemaPath: ".properties.spec.properties.ports",
+			schemaPath: "properties.spec.properties.ports",
 		},
 		"array": {
 			path:       ".spec.ports.0",
-			schemaPath: ".properties.spec.properties.ports.items",
+			schemaPath: "properties.spec.properties.ports.items",
 		},
 		"nested-array": {
 			path:       ".spec.ports.0.name.23.yolo",
-			schemaPath: ".properties.spec.properties.ports.items.properties.name.items.properties.yolo",
+			schemaPath: "properties.spec.properties.ports.items.properties.name.items.properties.yolo",
 		},
 	}
 

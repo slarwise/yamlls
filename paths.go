@@ -124,5 +124,5 @@ func pathToSchemaPath(path string) string {
 			schemaSegments = append(schemaSegments, "properties", segment)
 		}
 	}
-	return "." + strings.Join(schemaSegments, ".")
+	return strings.Join(schemaSegments, ".")
 }
