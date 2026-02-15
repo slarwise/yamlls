@@ -577,7 +577,7 @@ func fileValidate(file string) ([]ValidationError, ValidationFailureReason) {
 	documents := documentsInFile(file)
 	var validationErrors []ValidationError
 	for _, doc := range documents {
-		gvk, ok := documentGVK([]byte(doc.document))
+		gvk, ok := documentGVK(doc.document)
 		if !ok {
 			validationErrors = append(validationErrors, ValidationError{
 				Range:    newRange(doc.start, 0, doc.end, 0),
@@ -826,7 +826,7 @@ func lspTextDocumentHover(rawParams json.RawMessage) (any, error) {
 		return nil, nil
 	}
 
-	gvk, ok := documentGVK([]byte(currentDocument))
+	gvk, ok := documentGVK(currentDocument)
 	if !ok {
 		return nil, errors.New("invalid yaml")
 	}
@@ -942,7 +942,7 @@ func lspMethodTextDocumentCodeAction(rawParams json.RawMessage) (any, error) {
 		pathAtCursor = arrayPath.ReplaceAllString(pathAtCursor, "[]")
 	}
 
-	gvk, ok := documentGVK([]byte(currentDocument))
+	gvk, ok := documentGVK(currentDocument)
 	if !ok {
 		return nil, errors.New("invalid yaml")
 	}
@@ -1057,22 +1057,22 @@ func lspMethodWorkspaceExecuteCommand(rawParams json.RawMessage) (any, error) {
 }
 
 // Return false if yaml is invalid
-func documentGVK(docBytes []byte) (GVK, bool) {
+func documentGVK(doc string) (GVK, bool) {
 	var document any
-	if err := yaml.Unmarshal(docBytes, &document); err != nil {
+	if err := yaml.Unmarshal([]byte(doc), &document); err != nil {
 		return GVK{}, false
 	}
-	doc, ok := document.(map[string]any)
+	object, ok := document.(map[string]any)
 	if !ok {
 		return GVK{}, true
 	}
 	var gvk GVK
-	if kind_, ok := doc["kind"]; ok {
+	if kind_, ok := object["kind"]; ok {
 		if kind, ok := kind_.(string); ok {
 			gvk.kind = kind
 		}
 	}
-	if apiVersion_, ok := doc["apiVersion"]; ok {
+	if apiVersion_, ok := object["apiVersion"]; ok {
 		if apiVersion, ok := apiVersion_.(string); ok {
 			split := strings.Split(apiVersion, "/")
 			switch len(split) {
